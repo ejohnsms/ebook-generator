@@ -1,0 +1,27 @@
+{
+  "story_id": "three_billy_goats_gruff",
+  "title": "Three Billy Goats Gruff",
+  "source_file": "/Users/edjohnson/dev/ebook-generation/stories/three_billy_goats_gruff.txt",
+  "source_language": "en",
+  "theme": "unmodified",
+  "content_rating": "none",
+  "target_languages": [
+    "en",
+    "hi"
+  ],
+  "ollama_text_model": "llama3.1:8b",
+  "ollama_prompt_model": "brxce/stable-diffusion-prompt-generator",
+  "ollama_image_model_preview": "x/flux2-klein:4b",
+  "ollama_image_model_draft": "x/flux2-klein:4b",
+  "ollama_image_model_final": "x/flux2-klein:9b",
+  "image_mode": "draft",
+  "layout_style": "traditional",
+  "image_style": "photo-realistic",
+  "audio_languages": [
+    "hi"
+  ],
+  "voice_preferences": {},
+  "created_at": "2026-03-01T23:05:20.347156",
+  "modified_at": "2026-03-01T23:05:20.347363",
+  "rating_justification": "Unmodified story, no rating assigned"
+}

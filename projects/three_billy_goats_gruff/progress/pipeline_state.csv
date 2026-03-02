@@ -1,0 +1,9 @@
+step,name,status,started_at,completed_at,error_message,attempts,output_artifact
+1,story_fetch,completed,2026-03-01T23:05:22.465378,2026-03-01T23:05:22.467864,,1,projects/three_billy_goats_gruff/raw.md
+2,story_modification,completed,2026-03-01T23:05:22.469851,2026-03-01T23:05:22.471783,,1,projects/three_billy_goats_gruff/story.md
+3,content_rating,completed,2026-03-01T23:05:22.473275,2026-03-01T23:05:22.474572,,1,projects/three_billy_goats_gruff/metadata.json
+4,translation,completed,2026-03-01T23:05:22.475905,2026-03-01T23:06:45.522086,,1,"projects/three_billy_goats_gruff/story.md,projects/three_billy_goats_gruff/story_hi.md"
+5,prompt_generation,completed,2026-03-01T23:06:45.524431,2026-03-01T23:07:05.232570,,1,projects/three_billy_goats_gruff/prompts/prompts.csv
+6,image_generation,completed,2026-03-01T23:07:05.234663,2026-03-01T23:10:09.859946,,1,projects/three_billy_goats_gruff/images
+7,ebook_compilation,completed,2026-03-01T23:10:09.865295,2026-03-01T23:10:11.636293,,1,"projects/three_billy_goats_gruff/compiled/three_billy_goats_gruff_en_draft.epub,projects/three_billy_goats_gruff/compiled/three_billy_goats_gruff_en_draft.pdf,projects/three_billy_goats_gruff/compiled/three_billy_goats_gruff_hi_draft.epub,projects/three_billy_goats_gruff/compiled/three_billy_goats_gruff_hi_draft.pdf"
+8,audio_generation,completed,2026-03-01T23:10:11.738936,2026-03-01T23:10:44.338498,,1,projects/three_billy_goats_gruff/audio
