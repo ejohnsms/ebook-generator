@@ -3,9 +3,9 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..backends import GenerationBackend
 from ..config import THEME_PROMPTS
 from ..models import StoryConfig, Theme
-from ..ollama.client import OllamaClient
 from ..utils.file_io import safe_read_text, safe_write_text
 
 
@@ -31,17 +31,17 @@ class StoryModifier:
     """Applies thematic transformations to stories using LLM.
 
     For UNMODIFIED theme: copies raw story as-is with minimal metadata.
-    For other themes: uses Ollama to rewrite story in the target theme
+    For other themes: uses the text model to rewrite story in the target theme
     and add annotations (DIRECTOR, THEME, IMAGE) for pipeline processing.
     """
 
-    def __init__(self, ollama_client: OllamaClient):
+    def __init__(self, backend: GenerationBackend):
         """Initialize story modifier.
 
         Args:
-            ollama_client: Ollama client for LLM generation
+            backend: Model backend for LLM generation
         """
-        self._ollama = ollama_client
+        self._backend = backend
 
     def execute(self, input_data: StoryModifyInput) -> StoryModifyOutput:
         """Apply theme modification to story.
@@ -54,7 +54,7 @@ class StoryModifier:
 
         Raises:
             FileNotFoundError: If raw markdown file doesn't exist
-            OllamaError: If LLM generation fails
+            BackendError: If LLM generation fails
         """
         # Read raw story
         raw_text = safe_read_text(input_data.raw_markdown_path)
@@ -114,7 +114,7 @@ source: wikipedia
 
         Raises:
             ValueError: If theme prompt not found
-            OllamaError: If LLM generation fails
+            BackendError: If LLM generation fails
         """
         # Get system prompt for theme
         theme_key = config.theme.value
@@ -126,9 +126,9 @@ source: wikipedia
         # Construct user prompt
         user_prompt = self._build_modification_prompt(raw_text, config)
 
-        # Generate with Ollama
-        modified_text = self._ollama.generate_text(
-            model=config.ollama_text_model,
+        # Generate with the text model
+        modified_text = self._backend.generate_text(
+            model=config.text_model,
             prompt=user_prompt,
             system=system_prompt,
             temperature=0.8,  # Higher temp for creative rewriting

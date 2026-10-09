@@ -10,58 +10,32 @@ This is a Python-based ebook generation pipeline that transforms stories (fetche
 1. Wikipedia Fetch - retrieve story source
 2. Story Modification - apply thematic transformations (cyberpunk, caribbean village, etc.)
 3. Content Rating - assign G, PG-13, etc. based on modifications
-4. Translation - translate to target languages using Ollama LLM
-5. Prompt Generation - create image prompts using `brxce/stable-diffusion-prompt-generator`
-6. Image Generation - generate illustrations using `x/flux2-klein` or `x/z-image-turbo`
+4. Translation - translate (with cultural adaptation) using the text model
+5. Prompt Generation - create image prompts using the text model
+6. Image Generation - generate illustrations with FLUX.2 Klein or Z-Image Turbo (mflux)
 7. Ebook Compilation - assemble story + images into ePub and PDF
 
 ## Development Environment
 
-**Stack:**
-- Docker + docker-compose (containerization)
-- pixi (package manager inside container)
-- Python 3.12+
-- Ollama (LLM and image generation service, runs as sibling container)
+**Stack (native on Apple Silicon; the Docker/NVIDIA setup in README.md is outdated):**
+- pixi (environment + tasks), Python 3.12
+- MLX backend (default): `mlx-lm` for text, `mflux` for images, models from Hugging Face cached under `HF_HOME`
+- Kokoro TTS (PyTorch) for narration; weasyprint + ebooklib for PDF/ePub
+- Ollama is optional (`EBOOK_GEN_BACKEND=ollama`), text only: Ollama removed image generation in v0.32.6
 
-**Key commands:**
+**Key commands** (paths passed to `--file` must be absolute: pixi tasks run from `code/`):
 
 ```bash
-# Start all services (app + Ollama)
-docker-compose up
-
-# Run the CLI inside container
-docker-compose exec app pixi run ebook-gen --help
-
-# Generate an ebook (sample images)
-docker-compose exec app pixi run ebook-gen generate "Three Billy Goats Gruff" \
-  --theme cyberpunk \
-  --rating PG-13 \
-  --languages en es \
-  --image-mode sample
-
-# Resume an interrupted run
-docker-compose exec app pixi run ebook-gen resume three-billy-goats-gruff
-
-# Check pipeline status
-docker-compose exec app pixi run ebook-gen status three-billy-goats-gruff
-
-# Preview generated images
-docker-compose exec app pixi run ebook-gen preview-images three-billy-goats-gruff
-
-# Promote sample images to full resolution
-docker-compose exec app pixi run ebook-gen promote-images three-billy-goats-gruff
-
-# Run tests
-docker-compose exec app pixi run test
-
-# Run tests with coverage
-docker-compose exec app pixi run test-cov
-
-# Lint
-docker-compose exec app pixi run lint
-
-# Format
-docker-compose exec app pixi run format
+pixi install                                  # create the environment
+pixi run ebook-gen generate "Three Billy Goats Gruff" \
+  --file "$PWD/stories/three_billy_goats_gruff.txt" \
+  --theme cyberpunk --rating PG-13 \
+  --languages en --languages es --image-mode preview
+pixi run ebook-gen status <story_id>
+pixi run ebook-gen resume <story_id>
+pixi run ebook-gen promote-images <story_id> --mode draft
+pixi run test                                 # tests
+pixi run lint                                 # ruff (pre-existing errors remain)
 ```
 
 ## Architecture
@@ -131,25 +105,17 @@ All annotations are stripped before ebook compilation.
 
 Both CSVs use atomic writes (write-to-temp-then-rename) to prevent corruption on crashes.
 
-### Ollama Integration
+### Model Backends
 
-**Models used:**
-- Text generation: `llama3.1:8b` (or configurable)
-- Prompt generation: `brxce/stable-diffusion-prompt-generator`
-- Image generation:
-  - Preview/Draft: `x/flux2-klein:4b` (4B params, faster)
-  - Final: `x/flux2-klein:9b` (9B params, higher quality)
+Components depend on `GenerationBackend` (`backends/base.py`): `generate_text(...)` and `generate_image(...)`. `create_backend()` picks the implementation from `EBOOK_GEN_BACKEND` (`mlx` default, or `ollama`).
 
-**Access pattern:**
-```bash
-# Prompt generation
-ollama run brxce/stable-diffusion-prompt-generator "story context + theme"
+**MLX defaults** (`config.py`):
+- Text, translation, rating and image prompts: `mlx-community/gemma-4-12B-it-qat-4bit`
+- Images, preview/draft: `mflux-community/flux2-klein-4b-mflux-q4` (Apache-2.0)
+- Images, final: `mflux-community/flux2-klein-9b-mflux-q4` (FLUX **non-commercial** license)
+- Alternative: `mflux-community/z-image-turbo-mflux-q8` (Apache-2.0)
 
-# Image generation
-ollama run x/flux2-klein "refined prompt text"
-```
-
-The `OllamaClient` wrapper handles retry logic, timeout handling, and error classification.
+`MLXBackend` keeps one model in memory at a time (24 GB machine) and maps legacy Ollama tags stored in old `metadata.json`/`prompts.csv` (e.g. `x/flux2-klein:4b`) to MLX repo ids via `LEGACY_MODEL_ALIASES`.
 
 ## Development Workflow
 

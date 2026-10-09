@@ -140,6 +140,58 @@ class OllamaConfig:
         )
 
 
+# Default models for the MLX backend (Hugging Face repo ids, cached under HF_HOME).
+# Image tiers: preview/draft share the fast 4B model; final uses 9B.
+# Note: FLUX.2-klein-9B is under the FLUX non-commercial license; 4B and
+# Z-Image-Turbo are Apache-2.0.
+DEFAULT_TEXT_MODEL = "mlx-community/gemma-4-12B-it-qat-4bit"
+DEFAULT_IMAGE_MODEL_PREVIEW = "mflux-community/flux2-klein-4b-mflux-q4"
+DEFAULT_IMAGE_MODEL_DRAFT = "mflux-community/flux2-klein-4b-mflux-q4"
+DEFAULT_IMAGE_MODEL_FINAL = "mflux-community/flux2-klein-9b-mflux-q4"
+
+# Ollama tags saved in older metadata.json / prompts.csv files, mapped to their
+# MLX equivalents so existing projects resume on the MLX backend.
+LEGACY_MODEL_ALIASES = {
+    "gemma4:12b": DEFAULT_TEXT_MODEL,
+    "llama3.1:8b": DEFAULT_TEXT_MODEL,
+    "brxce/stable-diffusion-prompt-generator": DEFAULT_TEXT_MODEL,
+    "brxce/stable-diffusion-prompt-generator:latest": DEFAULT_TEXT_MODEL,
+    "x/flux2-klein": DEFAULT_IMAGE_MODEL_PREVIEW,
+    "x/flux2-klein:latest": DEFAULT_IMAGE_MODEL_PREVIEW,
+    "x/flux2-klein:4b": DEFAULT_IMAGE_MODEL_PREVIEW,
+    "x/flux2-klein:9b": DEFAULT_IMAGE_MODEL_FINAL,
+    "x/z-image-turbo": "mflux-community/z-image-turbo-mflux-q8",
+    "x/z-image-turbo:latest": "mflux-community/z-image-turbo-mflux-q8",
+}
+
+
+class BackendKind(str, Enum):
+    """Which model runner the pipeline uses.
+
+    mlx:    In-process MLX (mlx-lm for text, mflux for images). Apple Silicon only.
+    ollama: Ollama HTTP API. Text only: Ollama dropped image generation in v0.32.6.
+    """
+
+    MLX = "mlx"
+    OLLAMA = "ollama"
+
+
+@dataclass
+class BackendConfig:
+    """Selects and configures the model backend."""
+
+    kind: BackendKind = BackendKind.MLX
+    ollama: OllamaConfig = field(default_factory=OllamaConfig)
+
+    @classmethod
+    def from_env(cls) -> "BackendConfig":
+        """Create configuration from environment variables (EBOOK_GEN_BACKEND)."""
+        return cls(
+            kind=BackendKind(os.getenv("EBOOK_GEN_BACKEND", BackendKind.MLX.value)),
+            ollama=OllamaConfig.from_env(),
+        )
+
+
 @dataclass
 class RetryConfig:
     """Configuration for retry behavior."""

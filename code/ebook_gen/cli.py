@@ -6,7 +6,7 @@ from pathlib import Path
 
 import click
 
-from .config import ProjectConfig
+from .config import DEFAULT_TEXT_MODEL, ProjectConfig
 from .models import (
     ContentRating,
     IMAGE_STYLE_VALUES,
@@ -134,13 +134,13 @@ def cli():
 )
 @click.option(
     "--text-model",
-    default="llama3.1:8b",
-    help="Ollama model for text generation",
+    default=DEFAULT_TEXT_MODEL,
+    help="Text model: a Hugging Face MLX repo id (or an Ollama tag with EBOOK_GEN_BACKEND=ollama)",
 )
 @click.option(
     "--prompt-model",
-    default="brxce/stable-diffusion-prompt-generator",
-    help="Ollama model for prompt generation",
+    default=None,
+    help="Model that writes image prompts (default: same as --text-model)",
 )
 @click.option(
     "--image-mode",
@@ -205,8 +205,8 @@ def generate(title, theme, rating, languages, text_model, prompt_model, image_mo
         theme=Theme(theme),
         content_rating=ContentRating(rating),
         target_languages=list(languages),
-        ollama_text_model=text_model,
-        ollama_prompt_model=prompt_model,
+        text_model=text_model,
+        prompt_model=prompt_model or text_model,
         image_mode=ImageMode(image_mode),
         image_style=image_style,
         audio_languages=list(audio_languages),
@@ -587,9 +587,9 @@ def promote_images(story_id, mode):
 
     # Select model for the target mode
     if target_mode == ImageMode.DRAFT:
-        new_model = config.ollama_image_model_draft
+        new_model = config.image_model_draft
     else:  # FINAL
-        new_model = config.ollama_image_model_final
+        new_model = config.image_model_final
 
     for record in records:
         record.status = ImageStatus.PENDING

@@ -13,9 +13,9 @@ from .components.prompt_generator import PromptGenInput, PromptGenerator
 from .components.story_modifier import StoryModifyInput, StoryModifier
 from .components.translator import TranslateInput, Translator
 from .components.file_fetcher import FileFetcher
-from .config import OllamaConfig, ProjectConfig
+from .backends import GenerationBackend, create_backend
+from .config import BackendConfig, BackendKind, ProjectConfig
 from .models import PIPELINE_STEPS, StepStatus, StoryConfig
-from .ollama.client import OllamaClient, OllamaError
 from .progress import ProgressTracker
 
 # Configure logging
@@ -43,25 +43,25 @@ class PipelineRunner:
         self,
         story_config: StoryConfig,
         project_config: ProjectConfig,
-        ollama_config: Optional[OllamaConfig] = None,
+        backend_config: Optional[BackendConfig] = None,
     ):
         """Initialize pipeline runner.
 
         Args:
             story_config: Configuration for the story
             project_config: Project directory configuration
-            ollama_config: Ollama client configuration (optional)
+            backend_config: Model backend selection (optional; default from env)
         """
         self._story_config = story_config
         self._project = project_config
-        self._ollama_config = ollama_config or OllamaConfig.from_env()
+        self._backend_config = backend_config or BackendConfig.from_env()
 
         # Initialize progress tracker
         progress_dir = self._project.get_progress_dir(story_config.story_id)
         self._progress = ProgressTracker(progress_dir)
 
-        # Ollama client (created lazily)
-        self._ollama: Optional[OllamaClient] = None
+        # Model backend (created lazily)
+        self._backend: Optional[GenerationBackend] = None
 
     def run(self, start_from_step: int = 1, end_at_step: int = 6) -> None:
         """Execute the pipeline from start_from_step to end_at_step.
@@ -82,15 +82,12 @@ class PipelineRunner:
         if not self._progress.get_steps():
             self._progress.load()
 
-        # Initialize Ollama client
-        self._ollama = OllamaClient(self._ollama_config)
+        # Initialize model backend
+        self._backend = create_backend(self._backend_config)
 
         try:
-            # Check Ollama health
-            if not self._ollama.health_check():
-                raise PipelineError(
-                    f"Cannot connect to Ollama at {self._ollama_config.base_url}"
-                )
+            if not self._backend.health_check():
+                raise PipelineError(self._backend_unavailable_message())
 
             # Execute each step
             for step_num, step_name in PIPELINE_STEPS:
@@ -112,9 +109,17 @@ class PipelineRunner:
             raise PipelineError(f"Pipeline failed: {e}") from e
 
         finally:
-            # Close Ollama client
-            if self._ollama:
-                self._ollama.close()
+            # Release HTTP connections / loaded models
+            if self._backend:
+                self._backend.close()
+
+    def _backend_unavailable_message(self) -> str:
+        if self._backend_config.kind == BackendKind.OLLAMA:
+            return f"Cannot connect to Ollama at {self._backend_config.ollama.base_url}"
+        return (
+            "MLX backend unavailable: it needs macOS on Apple Silicon with mlx installed. "
+            "Set EBOOK_GEN_BACKEND=ollama to use Ollama instead."
+        )
 
     def resume(self) -> None:
         """Resume pipeline from the first non-completed step.
@@ -237,7 +242,7 @@ class PipelineRunner:
                 f"Run step 1 (Wikipedia fetch) first."
             )
 
-        modifier = StoryModifier(self._ollama)
+        modifier = StoryModifier(self._backend)
         input_data = StoryModifyInput(
             raw_markdown_path=raw_path,
             story_config=self._story_config,
@@ -263,7 +268,7 @@ class PipelineRunner:
                 f"Run step 2 (Story modification) first."
             )
 
-        rater = ContentRater(self._ollama)
+        rater = ContentRater(self._backend)
         input_data = ContentRateInput(
             story_markdown_path=story_path,
             story_config=self._story_config,
@@ -289,7 +294,7 @@ class PipelineRunner:
                 f"Run step 3 (Content rating) first."
             )
 
-        translator = Translator(self._ollama)
+        translator = Translator(self._backend)
         input_data = TranslateInput(
             story_markdown_path=story_path,
             story_config=self._story_config,
@@ -318,7 +323,7 @@ class PipelineRunner:
                 f"Run previous steps first."
             )
 
-        generator = PromptGenerator(self._ollama)
+        generator = PromptGenerator(self._backend)
         input_data = PromptGenInput(
             story_markdown_path=story_path,
             story_config=self._story_config,
@@ -348,7 +353,7 @@ class PipelineRunner:
                 f"Run step 5 (prompt generation) first."
             )
 
-        generator = ImageGenerator(self._ollama)
+        generator = ImageGenerator(self._backend)
         input_data = ImageGenInput(
             prompts_csv_path=prompts_csv,
             story_config=self._story_config,

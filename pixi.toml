@@ -5,6 +5,11 @@ description = "Generate themed, illustrated ebooks from story sources"
 channels = ["conda-forge"]
 platforms = ["linux-64", "linux-aarch64", "osx-arm64", "osx-64"]
 
+# Current torch/mlx/mflux wheels are macosx_14_0+. The per-platform form pixi
+# suggests rejects the plain "osx-arm64" name, so keep this table for now.
+[system-requirements]
+macos = "14.0"
+
 [dependencies]
 python = ">=3.12,<3.13"
 pip = "*"
@@ -31,3 +36,10 @@ test = { cmd = "pytest tests/ -v", cwd = "code" }
 test-cov = { cmd = "pytest tests/ --cov=ebook_gen --cov-report=term-missing", cwd = "code" }
 lint = { cmd = "ruff check ebook_gen/ tests/", cwd = "code" }
 format = { cmd = "ruff format ebook_gen/ tests/", cwd = "code" }
+
+[target.osx-arm64.pypi-dependencies]
+mlx-lm = ">=0.32"
+mflux = ">=0.22"
+
+[target.osx-arm64.dependencies]
+pytorch = ">=2.13"
