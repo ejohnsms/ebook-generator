@@ -567,7 +567,8 @@ def preview_images(story_id):
     default="draft",
     help="Target quality tier: draft (medium-res, layout review) or final (full-res, publication)",
 )
-def promote_images(story_id, mode):
+@click.option("--yes", "-y", is_flag=True, help="Regenerate without asking if already in this mode")
+def promote_images(story_id, mode, yes):
     """Promote images to the next quality tier.
 
     Resets image statuses to 'pending', updates dimensions and model for the
@@ -595,7 +596,8 @@ def promote_images(story_id, mode):
 
     if config.image_mode == target_mode:
         click.echo(f"Images are already in '{mode}' mode.")
-        click.confirm("Regenerate anyway?", abort=True)
+        if not yes:
+            click.confirm("Regenerate anyway?", abort=True)
 
     # Update mode in config
     config.image_mode = target_mode
@@ -634,6 +636,13 @@ def promote_images(story_id, mode):
 
     write_image_records(prompts_csv, records)
     click.echo(f"Reset {len(records)} image(s) to pending with {mode} dimensions")
+
+    # Regenerate the images, and rebuild the books made from the old ones;
+    # otherwise the completed step 6 is skipped and the records stay pending.
+    tracker = ProgressTracker(project.get_progress_dir(story_id))
+    tracker.load()
+    tracker.reset_step(6)
+    tracker.reset_step(7)
 
     # Run image generation
     click.echo(f"\n▶️  Running image generation in {mode} mode...")

@@ -23,7 +23,7 @@ _HTML_TEMPLATE = """\
   <meta charset="utf-8" />
   <title>{title}</title>
   <style>
-    body {{ font-family: Georgia, "Times New Roman", serif;
+    body {{ font-family: Georgia, "Libre Baskerville", "Times New Roman", "DejaVu Serif", serif;
            max-width: 700px; margin: 0 auto; padding: 2em; line-height: 1.7; }}
     h1 {{ text-align: center; font-size: 2em; margin-bottom: 0.3em; }}
     h2 {{ font-size: 1.4em; margin-top: 2em; border-bottom: 1px solid #ccc; }}

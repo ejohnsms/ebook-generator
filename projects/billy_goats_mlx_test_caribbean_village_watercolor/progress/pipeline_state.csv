@@ -1,0 +1,9 @@
+step,name,status,started_at,completed_at,error_message,attempts,output_artifact
+1,story_fetch,completed,2026-10-09T23:09:51.814365,2026-10-09T23:09:51.815287,,1,projects/billy_goats_mlx_test_caribbean_village_watercolor/raw.md
+2,story_modification,completed,2026-10-09T23:09:51.815498,2026-10-09T23:12:58.881197,,1,projects/billy_goats_mlx_test_caribbean_village_watercolor/story.md
+3,content_rating,completed,2026-10-09T23:12:58.882638,2026-10-09T23:13:47.634837,,1,projects/billy_goats_mlx_test_caribbean_village_watercolor/metadata.json
+4,translation,completed,2026-10-09T23:13:47.636121,2026-10-09T23:16:40.041383,,1,"projects/billy_goats_mlx_test_caribbean_village_watercolor/story.md,projects/billy_goats_mlx_test_caribbean_village_watercolor/story_es.md"
+5,prompt_generation,completed,2026-10-09T23:16:40.042444,2026-10-09T23:18:23.066808,,1,projects/billy_goats_mlx_test_caribbean_village_watercolor/prompts/prompts.csv
+6,image_generation,completed,2026-10-09T23:18:23.067256,2026-10-09T23:19:26.911122,,1,projects/billy_goats_mlx_test_caribbean_village_watercolor/images
+7,ebook_compilation,completed,2026-10-09T23:19:26.911807,2026-10-09T23:19:27.562498,,1,"projects/billy_goats_mlx_test_caribbean_village_watercolor/compiled/billy_goats_mlx_test_caribbean_village_watercolor_en_draft.epub,projects/billy_goats_mlx_test_caribbean_village_watercolor/compiled/billy_goats_mlx_test_caribbean_village_watercolor_en_draft.pdf,projects/billy_goats_mlx_test_caribbean_village_watercolor/compiled/billy_goats_mlx_test_caribbean_village_watercolor_es_draft.epub,projects/billy_goats_mlx_test_caribbean_village_watercolor/compiled/billy_goats_mlx_test_caribbean_village_watercolor_es_draft.pdf"
+8,audio_generation,completed,2026-10-09T23:19:27.971646,2026-10-09T23:20:42.441660,,1,projects/billy_goats_mlx_test_caribbean_village_watercolor/audio

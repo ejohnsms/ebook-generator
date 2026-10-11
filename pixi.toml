@@ -20,10 +20,13 @@ httpx = ">=0.27"
 [feature.text.pypi-dependencies]
 markdownify = ">=0.13"
 
-# Step 7: Markdown + images -> ePub and PDF.
+# Step 7: Markdown + images -> ePub and PDF. The image has no system fonts:
+# Libre Baskerville is the body serif, DejaVu the wide-coverage fallback.
 [feature.compile.dependencies]
 weasyprint = ">=62"
 fonts-conda-ecosystem = "*"
+font-libre-baskerville = "*"
+font-ttf-dejavu = "*"
 
 [feature.compile.pypi-dependencies]
 markdown-it-py = ">=3.0"

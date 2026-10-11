@@ -358,9 +358,12 @@ case $cmd in
         ;;
 
     promote-images)
+        [ $# -ge 1 ] || die "Usage: ./ebook-gen promote-images STORY_ID --mode draft|final"
         ensure_system
         start_server
         cli_in images promote-images "$@"
+        # Rebuild the ebook from the new images (draft and final compile)
+        run_stages "$1"
         ;;
 
     tui)

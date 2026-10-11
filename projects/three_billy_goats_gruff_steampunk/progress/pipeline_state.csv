@@ -1,0 +1,9 @@
+step,name,status,started_at,completed_at,error_message,attempts,output_artifact
+1,story_fetch,completed,2026-10-11T01:03:18.015002,2026-10-11T01:03:18.016167,,1,projects/three_billy_goats_gruff_steampunk/raw.md
+2,story_modification,completed,2026-10-11T01:03:18.061007,2026-10-11T01:06:05.832240,,1,projects/three_billy_goats_gruff_steampunk/story.md
+3,content_rating,completed,2026-10-11T01:06:05.834018,2026-10-11T01:07:00.193845,,1,projects/three_billy_goats_gruff_steampunk/metadata.json
+4,translation,completed,2026-10-11T01:07:00.195721,2026-10-11T01:09:32.325097,,1,"projects/three_billy_goats_gruff_steampunk/story.md,projects/three_billy_goats_gruff_steampunk/story_es.md"
+5,prompt_generation,completed,2026-10-11T01:09:32.328142,2026-10-11T01:11:38.757412,,1,projects/three_billy_goats_gruff_steampunk/prompts/prompts.csv
+6,image_generation,completed,2026-10-11T01:12:56.047625,2026-10-11T01:13:38.600330,,1,projects/three_billy_goats_gruff_steampunk/images
+7,ebook_compilation,pending,,,,0,
+8,audio_generation,pending,,,,0,

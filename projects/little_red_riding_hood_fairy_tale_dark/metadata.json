@@ -1,0 +1,23 @@
+{
+  "story_id": "little_red_riding_hood_fairy_tale_dark",
+  "title": "Little Red Riding Hood",
+  "source_file": "/workspace/stories/little_red_riding_hood.txt",
+  "source_language": "en",
+  "theme": "fairy_tale_dark",
+  "content_rating": "PG-13",
+  "target_languages": [
+    "en"
+  ],
+  "text_model": "mlx-community/gemma-4-12B-it-qat-4bit",
+  "prompt_model": "mlx-community/gemma-4-12B-it-qat-4bit",
+  "image_model_preview": "mflux-community/flux2-klein-4b-mflux-q4",
+  "image_model_draft": "mflux-community/flux2-klein-4b-mflux-q4",
+  "image_model_final": "mflux-community/flux2-klein-9b-mflux-q4",
+  "image_mode": "draft",
+  "layout_style": "traditional",
+  "image_style": "photo-realistic",
+  "audio_languages": [],
+  "voice_preferences": {},
+  "created_at": "2026-10-11T01:23:32.090454",
+  "modified_at": "2026-10-11T01:23:32.090456"
+}

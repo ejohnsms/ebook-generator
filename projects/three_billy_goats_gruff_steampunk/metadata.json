@@ -1,0 +1,25 @@
+{
+  "story_id": "three_billy_goats_gruff_steampunk",
+  "title": "Three Billy Goats Gruff",
+  "source_file": "/workspace/stories/three_billy_goats_gruff.txt",
+  "source_language": "en",
+  "theme": "steampunk",
+  "content_rating": "G",
+  "target_languages": [
+    "en",
+    "es"
+  ],
+  "text_model": "mlx-community/gemma-4-12B-it-qat-4bit",
+  "prompt_model": "mlx-community/gemma-4-12B-it-qat-4bit",
+  "image_model_preview": "mflux-community/flux2-klein-4b-mflux-q4",
+  "image_model_draft": "mflux-community/flux2-klein-4b-mflux-q4",
+  "image_model_final": "mflux-community/flux2-klein-9b-mflux-q4",
+  "image_mode": "preview",
+  "layout_style": "traditional",
+  "image_style": "photo-realistic",
+  "audio_languages": [],
+  "voice_preferences": {},
+  "created_at": "2026-10-11T01:03:17.873616",
+  "modified_at": "2026-10-11T01:03:17.873618",
+  "rating_justification": "Target rating G applied (recommended: PG). While the story is a fantasy/steampunk retelling of a fable, it contains descriptions of violence and physical harm that exceed a 'G' rating. The Automaton threatens to 'dismantle' characters for 'flesh and bone,' and the climax involves 'piercing sensors' and 'cracking hulls.' The imagery of a monster demanding a toll of flesh and the visceral description of the machine's destruction are more appropriate for a PG audience."
+}

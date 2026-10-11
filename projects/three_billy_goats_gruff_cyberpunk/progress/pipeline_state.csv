@@ -1,0 +1,9 @@
+step,name,status,started_at,completed_at,error_message,attempts,output_artifact
+1,story_fetch,completed,2026-10-10T00:34:21.541582,2026-10-10T00:34:21.542519,,1,projects/three_billy_goats_gruff_cyberpunk/raw.md
+2,story_modification,completed,2026-10-10T00:34:21.542705,2026-10-10T00:37:17.620805,,1,projects/three_billy_goats_gruff_cyberpunk/story.md
+3,content_rating,completed,2026-10-10T00:37:17.621255,2026-10-10T00:37:59.573446,,1,projects/three_billy_goats_gruff_cyberpunk/metadata.json
+4,translation,completed,2026-10-10T00:37:59.573706,2026-10-10T00:40:17.441781,,1,"projects/three_billy_goats_gruff_cyberpunk/story.md,projects/three_billy_goats_gruff_cyberpunk/story_es.md"
+5,prompt_generation,completed,2026-10-10T00:40:17.442096,2026-10-10T00:42:25.092413,,1,projects/three_billy_goats_gruff_cyberpunk/prompts/prompts.csv
+6,image_generation,completed,2026-10-10T00:42:25.092691,2026-10-10T00:43:04.295521,,1,projects/three_billy_goats_gruff_cyberpunk/images
+7,ebook_compilation,pending,,,,0,
+8,audio_generation,pending,,,,0,

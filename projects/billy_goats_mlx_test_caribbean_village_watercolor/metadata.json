@@ -1,0 +1,27 @@
+{
+  "story_id": "billy_goats_mlx_test_caribbean_village_watercolor",
+  "title": "Billy Goats MLX Test",
+  "source_file": "/Users/eduardo/dev/ebook-generator/stories/three_billy_goats_gruff.txt",
+  "source_language": "en",
+  "theme": "caribbean_village",
+  "content_rating": "G",
+  "target_languages": [
+    "en",
+    "es"
+  ],
+  "text_model": "mlx-community/gemma-4-12B-it-qat-4bit",
+  "prompt_model": "mlx-community/gemma-4-12B-it-qat-4bit",
+  "image_model_preview": "mflux-community/flux2-klein-4b-mflux-q4",
+  "image_model_draft": "mflux-community/flux2-klein-4b-mflux-q4",
+  "image_model_final": "mflux-community/flux2-klein-9b-mflux-q4",
+  "image_mode": "draft",
+  "layout_style": "traditional",
+  "image_style": "watercolor, soft watercolor",
+  "audio_languages": [
+    "es"
+  ],
+  "voice_preferences": {},
+  "created_at": "2026-10-09T23:09:49.803753",
+  "modified_at": "2026-10-09T23:09:49.803853",
+  "rating_justification": "Target rating G applied (recommended: PG). While the story is a fable with a clear moral, it contains elements of mild peril and aggressive imagery that lean toward a PG rating rather than a G rating. Specifically, the 'Shadow-Man' is depicted as a predatory monster intending to 'gobble' the characters, and the climax involves a violent confrontation where the protagonist threatens to 'crack bones' and 'poke out peepers.' These elements of fantasy violence and mild menace are generally considered more appropriate for older children."
+}

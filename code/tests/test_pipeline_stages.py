@@ -137,3 +137,34 @@ def test_pipeline_imports_without_text_stage_packages():
 
     code = "import sys, ebook_gen.cli, ebook_gen.pipeline; assert 'markdownify' not in sys.modules"
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+class TestPromoteImages:
+    def test_resets_images_and_compile_steps(self, project, monkeypatch):
+        from ebook_gen.models import ImageRecord, ImageStatus
+        from ebook_gen.utils.csv_io import read_image_records, write_image_records
+
+        monkeypatch.delenv("EBOOK_GEN_STAGE", raising=False)
+        monkeypatch.setattr(cli_module, "get_project_config", lambda: project)
+        make_story(project, image_mode=ImageMode.PREVIEW, completed=range(1, 9))
+        prompts_csv = project.get_prompts_dir("goats") / "prompts.csv"
+        prompts_csv.parent.mkdir(parents=True)
+        write_image_records(prompts_csv, [
+            ImageRecord(image_id="img_000", name="cover", description="c", prompt="p",
+                        model="m", target_filename="cover.png", status=ImageStatus.COMPLETED,
+                        width=256, height=256, seed=1),
+        ])
+
+        ran = []
+        monkeypatch.setattr(PipelineRunner, "run", lambda self, start_from_step, end_at_step: ran.append((start_from_step, end_at_step)))
+        result = CliRunner().invoke(cli_module.cli, ["promote-images", "goats", "--mode", "draft"])
+        assert result.exit_code == 0, result.output
+
+        tracker = ProgressTracker(project.get_progress_dir("goats"))
+        tracker.load()
+        assert not tracker.is_step_completed(6)
+        assert not tracker.is_step_completed(7)
+        assert tracker.is_step_completed(8)  # narration doesn't depend on the images
+        assert ran == [(6, 6)]
+        record = read_image_records(prompts_csv)[0]
+        assert (record.status, record.width, record.height) == (ImageStatus.PENDING, 512, 512)

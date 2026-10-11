@@ -1,0 +1,25 @@
+{
+  "story_id": "three_billy_goats_gruff_cyberpunk",
+  "title": "Three Billy Goats Gruff",
+  "source_file": "/Users/eduardo/dev/ebook-generator/stories/three_billy_goats_gruff.txt",
+  "source_language": "en",
+  "theme": "cyberpunk",
+  "content_rating": "R",
+  "target_languages": [
+    "en",
+    "es"
+  ],
+  "text_model": "mlx-community/gemma-4-12B-it-qat-4bit",
+  "prompt_model": "mlx-community/gemma-4-12B-it-qat-4bit",
+  "image_model_preview": "mflux-community/flux2-klein-4b-mflux-q4",
+  "image_model_draft": "mflux-community/flux2-klein-4b-mflux-q4",
+  "image_model_final": "mflux-community/flux2-klein-9b-mflux-q4",
+  "image_mode": "preview",
+  "layout_style": "traditional",
+  "image_style": "photo-realistic",
+  "audio_languages": [],
+  "voice_preferences": {},
+  "created_at": "2026-10-10T00:34:19.582065",
+  "modified_at": "2026-10-10T00:34:19.582213",
+  "rating_justification": "Target rating R applied (recommended: PG-13). While the story features cyberpunk violence, industrial decay, and aggressive dialogue, it lacks the extreme graphic gore, pervasive profanity, or explicit sexual content required for an R rating. The violence is stylized and mechanical (cybernetic combat) rather than visceral or realistic. The 'Troll' dialogue is menacing but serves as a thematic representation of technological decay."
+}
