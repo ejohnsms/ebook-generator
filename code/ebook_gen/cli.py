@@ -1,6 +1,7 @@
 """Command-line interface for ebook generation."""
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -20,11 +21,9 @@ from .progress import ProgressTracker
 
 def get_project_config() -> ProjectConfig:
     """Get the project configuration from current directory."""
-    # In Docker, we're in /workspace
-    # When running locally, find the project root
+    # Containers run from /workspace (the project root); a shell in code/ uses its parent
     current = Path.cwd()
 
-    # Check if we're in /workspace (Docker) or find project root
     if current.name == "code":
         root = current.parent
     elif (current / "code").exists():
@@ -235,11 +234,10 @@ def generate(title, theme, rating, languages, text_model, prompt_model, image_mo
         )
         return
 
-    # Determine step range based on image mode
-    # preview → steps 1-6 (no compilation, no audio)
-    # draft   → steps 1-7 (with ebook compilation) + step 8 if audio requested
-    # final   → steps 1-7 (with ebook compilation) + step 8 if audio requested
-    end_step = 6 if image_mode == "preview" else 7
+    # Tell the ./ebook-gen wrapper which story the later stage containers resume
+    story_id_file = os.getenv("EBOOK_GEN_STORY_ID_FILE")
+    if story_id_file:
+        Path(story_id_file).write_text(story_id)
 
     # Run pipeline
     click.echo("\n▶️  Starting pipeline execution...")
@@ -258,12 +256,11 @@ def generate(title, theme, rating, languages, text_model, prompt_model, image_mo
     from .pipeline import PipelineRunner
 
     try:
+        # preview → steps 1-6; draft/final → 1-7, plus step 8 if audio requested
         runner = PipelineRunner(config, project)
-        runner.run(start_from_step=1, end_at_step=end_step)
-
-        # Audio generation (step 8): draft and final modes with audio languages
-        if audio_languages and image_mode != "preview":
-            runner.run(start_from_step=8, end_at_step=8)
+        runner.run(start_from_step=1, end_at_step=runner.planned_end_step())
+        if not _report_finished(runner):
+            return
 
         images_dir_story = project.get_images_dir(story_id)
         click.echo("\n✅ Pipeline execution completed successfully!")
@@ -312,14 +309,6 @@ def resume(story_id):
         )
         sys.exit(1)
 
-    resume_step = tracker.get_resume_step()
-    if resume_step is None:
-        click.echo(f"✓ Pipeline for '{story_id}' is already complete!")
-        return
-
-    click.echo(f"▶️  Resuming pipeline for: {story_id}")
-    click.echo(f"   Starting from step {resume_step}")
-
     # Load story config from metadata
     story_dir = project.get_story_dir(story_id)
     metadata_path = story_dir / "metadata.json"
@@ -333,19 +322,59 @@ def resume(story_id):
 
     config = StoryConfig.from_dict(config_dict)
 
-    # Run pipeline
-    from .pipeline import PipelineRunner
+    from .models import PIPELINE_STAGES
+    from .pipeline import PipelineRunner, current_stage
+
+    runner = PipelineRunner(config, project)
+    resume_step = tracker.get_resume_step()
+    if resume_step is None or resume_step > runner.planned_end_step():
+        click.echo(f"✓ Pipeline for '{story_id}' is already complete!")
+        return
+
+    # A later stage's container picks the story up from here
+    stage = current_stage()
+    if stage and resume_step > max(PIPELINE_STAGES[stage]):
+        return
+
+    click.echo(f"▶️  Resuming pipeline for: {story_id}")
+    click.echo(f"   Starting from step {resume_step}")
 
     try:
-        runner = PipelineRunner(config, project)
         runner.resume()
 
-        click.echo("\n✅ Pipeline resumed successfully!")
-        _write_obsidian_note(config, project, story_id)
+        if _report_finished(runner):
+            click.echo("\n✅ Pipeline resumed successfully!")
+            _write_obsidian_note(config, project, story_id)
 
     except Exception as e:
         click.echo(f"\n❌ Resume failed: {e}", err=True)
         sys.exit(1)
+
+
+@cli.command(hidden=True)
+@click.argument("story_id")
+def stages(story_id):
+    """Print the pipeline stages with steps left to run, one per line.
+
+    The ./ebook-gen wrapper uses this to start only the containers a story
+    still needs (a preview run never reaches compile or audio).
+    """
+    from .models import PIPELINE_STAGES
+    from .pipeline import PipelineRunner
+
+    project = get_project_config()
+    with open(project.get_story_dir(story_id) / "metadata.json") as f:
+        config = StoryConfig.from_dict(json.load(f))
+
+    runner = PipelineRunner(config, project)
+    tracker = ProgressTracker(project.get_progress_dir(story_id))
+    tracker.load()
+    for stage, steps in PIPELINE_STAGES.items():
+        if any(
+            step <= runner.planned_end_step() and not tracker.is_step_completed(step)
+            for step in steps
+        ):
+            click.echo(stage)
 
 
 @cli.command()
@@ -473,8 +502,9 @@ def retry(story_id, step):
     try:
         runner = PipelineRunner(config, project)
         runner.resume()
-        click.echo("\n✅ Retry completed successfully!")
-        _write_obsidian_note(config, project, story_id)
+        if _report_finished(runner):
+            click.echo("\n✅ Retry completed successfully!")
+            _write_obsidian_note(config, project, story_id)
     except Exception as e:
         click.echo(f"\n❌ Retry failed: {e}", err=True)
         sys.exit(1)
@@ -621,6 +651,20 @@ def promote_images(story_id, mode):
         click.echo(f"\n❌ Image generation failed: {e}", err=True)
         click.echo(f"\n💡 Use 'ebook-gen retry {story_id} --step 6' to retry", err=True)
         sys.exit(1)
+
+
+def _report_finished(runner) -> bool:
+    """True if the story's pipeline is done; otherwise note this stage is done.
+
+    In a pipeline container only one stage runs, and the ./ebook-gen wrapper
+    starts the next stage's container afterwards.
+    """
+    if runner.is_finished():
+        return True
+    stage = os.getenv("EBOOK_GEN_STAGE")
+    if stage:
+        click.echo(f"\n✓ '{stage}' stage done")
+    return False
 
 
 def _write_obsidian_note(config: StoryConfig, project: ProjectConfig, story_id: str) -> None:

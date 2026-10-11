@@ -1,6 +1,7 @@
 """Pipeline orchestration for ebook generation."""
 
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -12,10 +13,9 @@ from .components.image_generator import ImageGenInput, ImageGenerator
 from .components.prompt_generator import PromptGenInput, PromptGenerator
 from .components.story_modifier import StoryModifyInput, StoryModifier
 from .components.translator import TranslateInput, Translator
-from .components.file_fetcher import FileFetcher
 from .backends import GenerationBackend, create_backend
 from .config import BackendConfig, BackendKind, ProjectConfig
-from .models import PIPELINE_STEPS, StepStatus, StoryConfig
+from .models import MODEL_STEPS, PIPELINE_STAGES, PIPELINE_STEPS, StepStatus, StoryConfig
 from .progress import ProgressTracker
 
 # Configure logging
@@ -30,6 +30,23 @@ class PipelineError(Exception):
     """Base exception for pipeline errors."""
 
     pass
+
+
+def current_stage() -> Optional[str]:
+    """The stage this process runs (EBOOK_GEN_STAGE), or None for all steps.
+
+    Each pipeline container sets it; the ./ebook-gen wrapper runs the other
+    stages in their own containers.
+
+    Raises:
+        PipelineError: EBOOK_GEN_STAGE names an unknown stage
+    """
+    stage = os.getenv("EBOOK_GEN_STAGE") or None
+    if stage and stage not in PIPELINE_STAGES:
+        raise PipelineError(
+            f"Unknown EBOOK_GEN_STAGE '{stage}'; expected one of {', '.join(PIPELINE_STAGES)}"
+        )
+    return stage
 
 
 class PipelineRunner:
@@ -55,6 +72,9 @@ class PipelineRunner:
         self._story_config = story_config
         self._project = project_config
         self._backend_config = backend_config or BackendConfig.from_env()
+
+        # In a pipeline container, only this stage's steps run here
+        self._stage = current_stage()
 
         # Initialize progress tracker
         progress_dir = self._project.get_progress_dir(story_config.story_id)
@@ -82,13 +102,7 @@ class PipelineRunner:
         if not self._progress.get_steps():
             self._progress.load()
 
-        # Initialize model backend
-        self._backend = create_backend(self._backend_config)
-
         try:
-            if not self._backend.health_check():
-                raise PipelineError(self._backend_unavailable_message())
-
             # Execute each step
             for step_num, step_name in PIPELINE_STEPS:
                 if step_num < start_from_step or step_num > end_at_step:
@@ -98,6 +112,15 @@ class PipelineRunner:
                 if self._progress.is_step_completed(step_num):
                     logger.info(f"Step {step_num} ({step_name}) already completed")
                     continue
+
+                if not self._in_stage(step_num, step_name):
+                    break
+
+                # Model steps need the backend; compile and audio don't
+                if step_num in MODEL_STEPS and self._backend is None:
+                    self._backend = create_backend(self._backend_config)
+                    if not self._backend.health_check():
+                        raise PipelineError(self._backend_unavailable_message())
 
                 logger.info(f"Executing step {step_num}: {step_name}")
                 self._execute_step(step_num, step_name)
@@ -112,10 +135,50 @@ class PipelineRunner:
             # Release HTTP connections / loaded models
             if self._backend:
                 self._backend.close()
+                self._backend = None
+
+    def _in_stage(self, step_num: int, step_name: str) -> bool:
+        """Whether this process runs step_num; False once past this stage's steps.
+
+        Raises:
+            PipelineError: An earlier stage's step is still incomplete
+        """
+        if self._stage is None:
+            return True
+        steps = PIPELINE_STAGES[self._stage]
+        if step_num in steps:
+            return True
+        if step_num < min(steps):
+            raise PipelineError(
+                f"Step {step_num} ({step_name}) must complete before the "
+                f"'{self._stage}' stage can run"
+            )
+        logger.info(f"Steps after {max(steps)} run outside the '{self._stage}' stage")
+        return False
+
+    def planned_end_step(self) -> int:
+        """Last step for this story: preview stops after images, audio adds step 8."""
+        if self._story_config.image_mode.value == "preview":
+            return 6
+        if self._story_config.audio_languages:
+            return 8
+        return 7
+
+    def is_finished(self) -> bool:
+        """Whether every step up to planned_end_step() is completed."""
+        return all(
+            self._progress.is_step_completed(step)
+            for step in range(1, self.planned_end_step() + 1)
+        )
 
     def _backend_unavailable_message(self) -> str:
         if self._backend_config.kind == BackendKind.OLLAMA:
             return f"Cannot connect to Ollama at {self._backend_config.ollama.base_url}"
+        if self._backend_config.kind == BackendKind.REMOTE:
+            return (
+                f"Cannot reach the model server at {self._backend_config.model_server.url}. "
+                "Start it with './ebook-gen model-server start'."
+            )
         return (
             "MLX backend unavailable: it needs macOS on Apple Silicon with mlx installed. "
             "Set EBOOK_GEN_BACKEND=ollama to use Ollama instead."
@@ -137,13 +200,7 @@ class PipelineRunner:
             return
 
         logger.info(f"Resuming from step {resume_step}")
-        if self._story_config.image_mode.value == "preview":
-            end_step = 6
-        elif self._story_config.audio_languages:
-            end_step = 8
-        else:
-            end_step = 7
-        self.run(start_from_step=resume_step, end_at_step=end_step)
+        self.run(start_from_step=resume_step, end_at_step=self.planned_end_step())
 
     def _execute_step(self, step_num: int, step_name: str) -> None:
         """Execute a single pipeline step.
@@ -211,7 +268,8 @@ class PipelineRunner:
         Returns:
             WikiFetchOutput
         """
-        from pathlib import Path
+        # Imported here: the fetchers need markdownify, which only the text image has
+        from .components.file_fetcher import FileFetcher
 
         story_dir = self._project.get_story_dir(self._story_config.story_id)
         story_dir.mkdir(parents=True, exist_ok=True)

@@ -73,3 +73,24 @@ class TestTranslatorHeadings:
         assert "## CHAPTER 1" in out
         assert "### SCENE" in out
         assert "\n# CHAPTER 1" not in out
+
+
+class TestContentRater:
+    def test_parses_nc17_recommendation(self):
+        from ebook_gen.components.content_rater import ContentRater
+        from ebook_gen.models import ContentRating
+
+        config = StoryConfig(
+            story_id="s", title="S", source_file="s.txt", content_rating=ContentRating.NC17
+        )
+        response = '{"recommended_rating": "NC-17", "matches_target": true, "justification": "x"}'
+        rating, _, _ = ContentRater(MagicMock())._parse_rating_response(response, config)
+        assert rating == ContentRating.NC17
+
+    def test_nc17_round_trips_through_metadata(self):
+        from ebook_gen.models import ContentRating
+
+        config = StoryConfig(
+            story_id="s", title="S", source_file="s.txt", content_rating=ContentRating.NC17
+        )
+        assert StoryConfig.from_dict(config.to_dict()).content_rating == ContentRating.NC17

@@ -169,11 +169,33 @@ class BackendKind(str, Enum):
     """Which model runner the pipeline uses.
 
     mlx:    In-process MLX (mlx-lm for text, mflux for images). Apple Silicon only.
+    remote: The host model server (ebook_gen.model_server) over HTTP. Used by
+            the pipeline containers, which can't reach Metal.
     ollama: Ollama HTTP API. Text only: Ollama dropped image generation in v0.32.6.
     """
 
     MLX = "mlx"
+    REMOTE = "remote"
     OLLAMA = "ollama"
+
+
+@dataclass
+class ModelServerConfig:
+    """Where the pipeline containers find the host model server."""
+
+    # 192.168.64.1 is the macOS host on the default `container` network.
+    url: str = "http://192.168.64.1:8765"
+    token: str = ""
+    timeout_seconds: float = 1800.0  # final-tier images and long chapters are slow
+
+    @classmethod
+    def from_env(cls) -> "ModelServerConfig":
+        """Create configuration from environment variables."""
+        return cls(
+            url=os.getenv("EBOOK_GEN_MODEL_SERVER", cls.url),
+            token=os.getenv("EBOOK_GEN_MODEL_SERVER_TOKEN", ""),
+            timeout_seconds=float(os.getenv("EBOOK_GEN_MODEL_SERVER_TIMEOUT", "1800")),
+        )
 
 
 @dataclass
@@ -182,6 +204,7 @@ class BackendConfig:
 
     kind: BackendKind = BackendKind.MLX
     ollama: OllamaConfig = field(default_factory=OllamaConfig)
+    model_server: ModelServerConfig = field(default_factory=ModelServerConfig)
 
     @classmethod
     def from_env(cls) -> "BackendConfig":
@@ -189,6 +212,7 @@ class BackendConfig:
         return cls(
             kind=BackendKind(os.getenv("EBOOK_GEN_BACKEND", BackendKind.MLX.value)),
             ollama=OllamaConfig.from_env(),
+            model_server=ModelServerConfig.from_env(),
         )
 
 

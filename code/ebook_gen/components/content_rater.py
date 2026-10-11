@@ -134,7 +134,7 @@ class ContentRater:
         """
         return """You are a content rating analyst. Your task is to analyze story content and:
 1. Identify potentially sensitive content (violence, language, themes, etc.)
-2. Assess appropriate content rating (G, PG, PG-13, R)
+2. Assess appropriate content rating (G, PG, PG-13, R, NC-17)
 3. Justify the rating with specific examples
 4. Flag specific passages that influenced the rating
 
@@ -168,7 +168,7 @@ Story:
 
 Output JSON format:
 {{
-  "recommended_rating": "G|PG|PG-13|R",
+  "recommended_rating": "G|PG|PG-13|R|NC-17",
   "matches_target": true|false,
   "justification": "Brief explanation of rating",
   "sensitive_passages": [

@@ -51,6 +51,7 @@ class ContentRating(Enum):
     PG = "PG"
     PG13 = "PG-13"
     R = "R"
+    NC17 = "NC-17"
 
 
 class ImageMode(Enum):
@@ -320,3 +321,14 @@ PIPELINE_STEPS = [
     (7, "ebook_compilation"),
     (8, "audio_generation"),
 ]
+
+# Steps each pipeline container runs (EBOOK_GEN_STAGE, set in Containerfile).
+PIPELINE_STAGES = {
+    "text": (1, 2, 3, 4, 5),
+    "images": (6,),
+    "compile": (7,),
+    "audio": (8,),
+}
+
+# Steps that call the text or image model.
+MODEL_STEPS = frozenset({2, 3, 4, 5, 6})

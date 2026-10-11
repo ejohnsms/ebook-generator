@@ -17,25 +17,27 @@ This is a Python-based ebook generation pipeline that transforms stories (fetche
 
 ## Development Environment
 
-**Stack (native on Apple Silicon; the Docker/NVIDIA setup in README.md is outdated):**
-- pixi (environment + tasks), Python 3.12
-- MLX backend (default): `mlx-lm` for text, `mflux` for images, models from Hugging Face cached under `HF_HOME`
-- Kokoro TTS (PyTorch) for narration; weasyprint + ebooklib for PDF/ePub
-- Ollama is optional (`EBOOK_GEN_BACKEND=ollama`), text only: Ollama removed image generation in v0.32.6
+**Everything runs through `./ebook-gen`, which runs each pipeline stage in an Apple `container` image (`brew install container`).** pixi only manages packages *inside* the images. Don't run `pixi install`/`pixi run` on the host.
 
-**Key commands** (paths passed to `--file` must be absolute: pixi tasks run from `code/`):
+- `Containerfile` builds one image per stage from a pixi environment in `pixi.toml` (platform `linux-aarch64`): `ebook-gen-text` (steps 1–5), `ebook-gen-images` (6), `ebook-gen-compile` (7, weasyprint + ebooklib), `ebook-gen-audio` (8, Kokoro TTS + espeak-ng on CPU), and `ebook-gen-dev` (tests, lint, TUI). Each image sets `EBOOK_GEN_STAGE`, and `PipelineRunner` only runs that stage's steps (`PIPELINE_STAGES` in `models.py`).
+- Containers can't reach Metal, so MLX runs in a **host model server** (`code/ebook_gen/model_server.py`, env in `model-server/` via uv). Images set `EBOOK_GEN_BACKEND=remote` and reach it at `192.168.64.1:8765` with a bearer token from `.ebook-gen/model-server.token`.
+- `./ebook-gen` starts `container system` if it's stopped, builds images that are missing or stale (hash of `Containerfile` + `pixi.toml`), starts the model server on demand, mounts the repo at `/workspace` and the `ebook-gen-hf` volume at `/hf` (not `HF_HOME`: a bind mount of the external-SSD cache hangs `container run`, since the runtime can't read removable volumes), and asks the hidden `ebook-gen stages STORY_ID` command which stage containers still need to run.
+- The `container` builder VM enables Rosetta by default and won't boot without it installed. The images are arm64, so instead `~/.config/container/config.toml` sets `[build] rosetta = false` (read when `container system start` runs).
+
+**Key commands** (`--file` accepts relative paths; files outside the repo are mounted read-only):
 
 ```bash
-pixi install                                  # create the environment
-pixi run ebook-gen generate "Three Billy Goats Gruff" \
-  --file "$PWD/stories/three_billy_goats_gruff.txt" \
+./ebook-gen build                              # build all images
+./ebook-gen generate "Three Billy Goats Gruff" \
+  --file stories/three_billy_goats_gruff.txt \
   --theme cyberpunk --rating PG-13 \
   --languages en --languages es --image-mode preview
-pixi run ebook-gen status <story_id>
-pixi run ebook-gen resume <story_id>
-pixi run ebook-gen promote-images <story_id> --mode draft
-pixi run test                                 # tests
-pixi run lint                                 # ruff (pre-existing errors remain)
+./ebook-gen status <story_id>
+./ebook-gen resume <story_id>
+./ebook-gen promote-images <story_id> --mode draft
+./ebook-gen model-server start|stop|status|logs
+./ebook-gen test                               # pytest in the dev image
+./ebook-gen lint                               # ruff (pre-existing errors remain)
 ```
 
 ## Architecture
@@ -107,7 +109,7 @@ Both CSVs use atomic writes (write-to-temp-then-rename) to prevent corruption on
 
 ### Model Backends
 
-Components depend on `GenerationBackend` (`backends/base.py`): `generate_text(...)` and `generate_image(...)`. `create_backend()` picks the implementation from `EBOOK_GEN_BACKEND` (`mlx` default, or `ollama`).
+Components depend on `GenerationBackend` (`backends/base.py`): `generate_text(...)` and `generate_image(...)`. `create_backend()` picks the implementation from `EBOOK_GEN_BACKEND`: `remote` (set in the images; `RemoteBackend` calls the host model server), `mlx` (code default; what the model server runs), or `ollama` (text only). `PipelineRunner` creates the backend only when a model step (2–6) runs, so the compile and audio containers don't need the model server.
 
 **MLX defaults** (`config.py`):
 - Text, translation, rating and image prompts: `mlx-community/gemma-4-12B-it-qat-4bit`
@@ -199,8 +201,8 @@ All file writes use atomic operations (write-to-temp-then-rename). Network opera
 
 **Run tests:**
 ```bash
-pixi run test          # All tests
-pixi run test-cov      # With coverage report
+./ebook-gen test                    # All tests (dev image)
+./ebook-gen test --cov=ebook_gen    # With coverage report
 ```
 
 ## Key Design Decisions
@@ -218,7 +220,7 @@ pixi run test-cov      # With coverage report
 
 ## Important Notes
 
-- **Never commit to main without tests passing** - Run `pixi run test` first
+- **Never commit to main without tests passing** - Run `./ebook-gen test` first
 - **Annotations must not break Markdown rendering** - Test story files in a Markdown previewer
 - **CSV writes must be atomic** - Use the `atomic_write()` helper in `utils/file_io.py`
 - **LLM outputs must be validated** - Check for required structure (chapters, annotations) before accepting
