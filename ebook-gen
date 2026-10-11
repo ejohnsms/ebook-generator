@@ -1,0 +1,400 @@
+#!/usr/bin/env bash
+# Run the ebook pipeline in Apple `container` images (brew install container).
+#
+# Each stage of the pipeline has its own image, built from Containerfile with
+# pixi managing the packages inside it:
+#
+#   ebook-gen-text     steps 1-5  story, theme, rating, translation, image prompts
+#   ebook-gen-images   step 6     illustrations
+#   ebook-gen-compile  step 7     ePub + PDF (weasyprint, ebooklib)
+#   ebook-gen-audio    step 8     narration (Kokoro TTS)
+#   ebook-gen-dev      tests, lint and the TUI
+#
+# Containers are Linux VMs without Metal, so the text and image models run in
+# a model server on the macOS host (code/ebook_gen/model_server.py, MLX),
+# which this script starts on demand with uv.
+#
+# Usage: ./ebook-gen <command> [args]   (see ./ebook-gen help)
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STATE_DIR="$ROOT/.ebook-gen"
+STAGES="text images compile audio"
+IMAGE_PREFIX="ebook-gen"
+PORT="${EBOOK_GEN_MODEL_SERVER_PORT:-8765}"
+# Hugging Face cache inside the containers (Kokoro weights for the audio
+# stage). A named volume by default: bind-mounting HF_HOME fails when it's on
+# an external drive, since the container runtime lacks the macOS permission to
+# read removable volumes and `container run` hangs. Set EBOOK_GEN_HF_CACHE to
+# a host directory to bind it instead.
+HF_VOLUME="ebook-gen-hf"
+HF_CACHE="${EBOOK_GEN_HF_CACHE:-}"
+VAULT="${OBSIDIAN_VAULT_DIR:-$HOME/Documents/Obsidian/MyVault}"
+
+# Extra `container run` flags for the next run_in call (bash 3.2: no local arrays in subshells)
+EXTRA_FLAGS=()
+
+die() { echo "ebook-gen: $*" >&2; exit 1; }
+info() { echo "==> $*" >&2; }
+
+usage() {
+    cat <<'EOF'
+Usage: ./ebook-gen <command> [args]
+
+Pipeline (each stage runs in its own container):
+  generate TITLE --file PATH [options]   Run a new story through the pipeline
+  resume STORY_ID                       Continue from the first incomplete step
+  retry STORY_ID [--step N]             Re-run failed steps (or step N)
+  promote-images STORY_ID --mode M      Regenerate images as draft or final
+  status STORY_ID                       Show pipeline progress
+  preview-images STORY_ID               List generated images
+  tui                                   Interactive terminal UI
+
+Setup and development:
+  build [STAGE...]                      Build images (default: all, plus dev)
+  model-server start|stop|status|logs   Manage the host MLX model server
+  test [PYTEST_ARGS...]                 Run the test suite
+  lint | format                         ruff check / ruff format
+  shell [STAGE]                         Shell in a stage image (default: dev)
+
+Run './ebook-gen generate --help' for generate's options. --file may be any
+path on the host; files outside this repository are mounted read-only.
+EOF
+}
+
+# ── container system and images ─────────────────────────────────────────────
+
+ensure_system() {
+    command -v container >/dev/null || die "Apple container CLI not found: brew install container"
+    if ! container system status 2>/dev/null | awk '$1 == "status" { print $2 }' | grep -qx running; then
+        info "Starting container services"
+        container system start
+    fi
+}
+
+# Hash of the files an image is built from, to rebuild stale images
+build_inputs_hash() {
+    cat "$ROOT/Containerfile" "$ROOT/pixi.toml" | shasum | cut -d' ' -f1
+}
+
+build_image() {
+    local env=$1 pipeline_stage=$1
+    [ "$env" = dev ] && pipeline_stage=""
+    # The builder VM enables Rosetta by default (for amd64 builds) and won't
+    # boot without it; these images are arm64, so turn it off instead
+    if container system property list 2>/dev/null | grep -qx 'rosetta = true' \
+        && ! /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then
+        die "The image builder is set to use Rosetta, which isn't installed. Images here
+are arm64 only, so disable it in ~/.config/container/config.toml:
+    [build]
+    rosetta = false
+then run: container system stop && container system start && container builder delete"
+    fi
+    info "Building $IMAGE_PREFIX-$env"
+    container build \
+        --build-arg "PIXI_ENV=$env" \
+        --build-arg "PIPELINE_STAGE=$pipeline_stage" \
+        -t "$IMAGE_PREFIX-$env" \
+        -f "$ROOT/Containerfile" \
+        "$ROOT" >&2
+    mkdir -p "$STATE_DIR"
+    build_inputs_hash > "$STATE_DIR/$env.built"
+}
+
+ensure_image() {
+    local env=$1
+    if ! container image inspect "$IMAGE_PREFIX-$env" >/dev/null 2>&1; then
+        build_image "$env"
+    elif [ "$(cat "$STATE_DIR/$env.built" 2>/dev/null)" != "$(build_inputs_hash)" ]; then
+        info "Containerfile or pixi.toml changed since $IMAGE_PREFIX-$env was built"
+        build_image "$env"
+    fi
+}
+
+# ── host model server ───────────────────────────────────────────────────────
+
+server_token() {
+    local file="$STATE_DIR/model-server.token"
+    if [ ! -s "$file" ]; then
+        mkdir -p "$STATE_DIR"
+        (umask 077 && openssl rand -hex 32 > "$file")
+    fi
+    cat "$file"
+}
+
+server_healthy() {
+    curl -sf -m 5 -H "Authorization: Bearer $(server_token)" \
+        "http://127.0.0.1:$PORT/health" >/dev/null 2>&1
+}
+
+server_pid() {
+    local pid
+    pid=$(cat "$STATE_DIR/model-server.pid" 2>/dev/null) || return 1
+    kill -0 "$pid" 2>/dev/null && echo "$pid"
+}
+
+start_server() {
+    server_healthy && return 0
+    command -v uv >/dev/null || die "uv not found (the model server runs on the host): brew install uv"
+    server_pid >/dev/null && die "Model server is running but not healthy; see ./ebook-gen model-server logs"
+
+    local log="$STATE_DIR/model-server.log"
+    info "Starting model server on port $PORT (log: ${log#"$ROOT"/})"
+    mkdir -p "$STATE_DIR"
+    EBOOK_GEN_MODEL_SERVER_TOKEN="$(server_token)" PYTHONPATH="$ROOT/code" \
+        nohup uv run --project "$ROOT/model-server" \
+        python -m ebook_gen.model_server --port "$PORT" >>"$log" 2>&1 &
+    echo $! > "$STATE_DIR/model-server.pid"
+
+    # The first start installs mlx-lm and mflux, which takes a while
+    local waited=0
+    until server_healthy; do
+        server_pid >/dev/null || { tail -20 "$log" >&2; die "Model server exited"; }
+        [ "$waited" -ge 600 ] && die "Model server did not become healthy; see $log"
+        sleep 2
+        waited=$((waited + 2))
+    done
+}
+
+stop_server() {
+    local pid
+    if pid=$(server_pid); then
+        info "Stopping model server (pid $pid)"
+        kill "$pid"
+    else
+        info "Model server is not running"
+    fi
+    rm -f "$STATE_DIR/model-server.pid"
+}
+
+# The macOS host as seen from containers: .1 on the default container network
+host_address() {
+    container network list 2>/dev/null | awk '$1 == "default" {
+        split($2, cidr, "/"); split(cidr[1], ip, ".")
+        print ip[1] "." ip[2] "." ip[3] ".1"
+    }'
+}
+
+server_url() {
+    if [ -n "${EBOOK_GEN_MODEL_SERVER:-}" ]; then
+        echo "$EBOOK_GEN_MODEL_SERVER"
+        return
+    fi
+    local host
+    host=$(host_address)
+    [ -n "$host" ] || die "Cannot find the default container network; set EBOOK_GEN_MODEL_SERVER"
+    echo "http://$host:$PORT"
+}
+
+# ── running stages ──────────────────────────────────────────────────────────
+
+stage_memory() {
+    case $1 in
+        audio | dev) echo "${EBOOK_GEN_AUDIO_MEMORY:-6G}" ;;
+        *) echo "${EBOOK_GEN_CONTAINER_MEMORY:-2G}" ;;
+    esac
+}
+
+# run_in STAGE COMMAND...: run COMMAND in the stage's image with the repo at /workspace
+run_in() {
+    local env=$1
+    shift
+    ensure_image "$env"
+
+    local flags=(--rm -m "$(stage_memory "$env")" -v "$ROOT:/workspace" -w /workspace)
+    # Only Kokoro (audio stage, or the TUI running every step) reads /hf. A
+    # named volume attaches to one VM at a time, so don't hold it elsewhere.
+    if [ "$env" = audio ] || [ "${NEEDS_HF:-0}" = 1 ]; then
+        if [ -n "$HF_CACHE" ]; then
+            flags+=(-v "$HF_CACHE:/hf")
+        else
+            container volume inspect "$HF_VOLUME" >/dev/null 2>&1 \
+                || container volume create "$HF_VOLUME" >/dev/null
+            flags+=(-v "$HF_VOLUME:/hf")
+        fi
+    fi
+    if [ -t 0 ] && [ -t 1 ]; then
+        flags+=(-it)
+    fi
+    if [ -d "$VAULT" ]; then
+        flags+=(-v "$VAULT:/obsidian" -e OBSIDIAN_VAULT_DIR=/obsidian)
+    fi
+    flags+=(-e "EBOOK_GEN_MODEL_SERVER=$(server_url)" -e "EBOOK_GEN_MODEL_SERVER_TOKEN=$(server_token)")
+    # Optional overrides, e.g. EBOOK_GEN_BACKEND=ollama for the text steps
+    local var
+    for var in EBOOK_GEN_BACKEND OLLAMA_HOST; do
+        if [ -n "${!var:-}" ]; then
+            flags+=(-e "$var=${!var}")
+        fi
+    done
+
+    container run "${flags[@]}" ${EXTRA_FLAGS[@]+"${EXTRA_FLAGS[@]}"} "$IMAGE_PREFIX-$env" "$@"
+    EXTRA_FLAGS=()
+}
+
+cli_in() {
+    local env=$1
+    shift
+    run_in "$env" python -m ebook_gen.cli "$@"
+}
+
+# Rewrite --file to its path inside the container into ARGS, and mount the
+# file's directory read-only if it lives outside the repo. Relative paths
+# resolve from the caller's working directory.
+ARGS=()
+translate_file_args() {
+    ARGS=()
+    local expect_file=0 arg
+    for arg in "$@"; do
+        if [ "$expect_file" = 1 ]; then
+            container_path "$arg"
+            ARGS+=("$CONTAINER_PATH")
+            expect_file=0
+            continue
+        fi
+        case $arg in
+            --file) ARGS+=("$arg"); expect_file=1 ;;
+            --file=*) container_path "${arg#--file=}"; ARGS+=("--file=$CONTAINER_PATH") ;;
+            *) ARGS+=("$arg") ;;
+        esac
+    done
+}
+
+# Sets CONTAINER_PATH (no subshell, so the mount reaches EXTRA_FLAGS)
+container_path() {
+    local path=$1 dir
+    [ -f "$path" ] || die "No such file: $path"
+    dir=$(cd "$(dirname "$path")" && pwd)
+    case $dir/ in
+        "$ROOT"/*) CONTAINER_PATH="/workspace${dir#"$ROOT"}/$(basename "$path")" ;;
+        *)
+            EXTRA_FLAGS+=(--mount "type=bind,source=$dir,target=/input,readonly")
+            CONTAINER_PATH="/input/$(basename "$path")"
+            ;;
+    esac
+}
+
+# Run each stage that still has steps for this story, in pipeline order
+run_stages() {
+    local story_id=$1 pending stage
+    pending=$(cli_in text stages "$story_id" | tr -d '\r')
+    for stage in $STAGES; do
+        if printf '%s\n' "$pending" | grep -qx "$stage"; then
+            cli_in "$stage" resume "$story_id"
+        fi
+    done
+}
+
+# ── commands ────────────────────────────────────────────────────────────────
+
+cmd=${1:-help}
+[ $# -gt 0 ] && shift
+
+case $cmd in
+    help | -h | --help)
+        usage
+        ;;
+
+    build)
+        ensure_system
+        for env in ${@:-$STAGES dev}; do
+            build_image "$env"
+        done
+        ;;
+
+    model-server)
+        case ${1:-status} in
+            start) start_server && info "Model server is up at http://127.0.0.1:$PORT" ;;
+            stop) stop_server ;;
+            status)
+                if server_healthy; then
+                    echo "running (pid $(server_pid || echo '?'), port $PORT)"
+                else
+                    echo "stopped"
+                fi
+                ;;
+            logs) tail -n 50 -f "$STATE_DIR/model-server.log" ;;
+            *) die "Usage: ./ebook-gen model-server start|stop|status|logs" ;;
+        esac
+        ;;
+
+    generate)
+        if [ $# -eq 0 ] || [[ " $* " == *" --help "* ]]; then
+            ensure_system
+            cli_in text generate "$@"
+            exit
+        fi
+        ensure_system
+        start_server
+        translate_file_args "$@"
+        # generate writes the story id here so the later stages can resume it
+        handoff=".ebook-gen/story-id.$$"
+        mkdir -p "$STATE_DIR"
+        rm -f "$ROOT/$handoff"
+        EXTRA_FLAGS+=(-e "EBOOK_GEN_STORY_ID_FILE=/workspace/$handoff")
+        cli_in text generate "${ARGS[@]}"
+        if [ -s "$ROOT/$handoff" ]; then
+            story_id=$(cat "$ROOT/$handoff")
+            rm -f "$ROOT/$handoff"
+            run_stages "$story_id"
+        fi
+        ;;
+
+    resume)
+        [ $# -ge 1 ] || die "Usage: ./ebook-gen resume STORY_ID"
+        ensure_system
+        start_server
+        run_stages "$1"
+        ;;
+
+    retry)
+        [ $# -ge 1 ] || die "Usage: ./ebook-gen retry STORY_ID [--step N]"
+        ensure_system
+        start_server
+        # Resets the steps and runs any that belong to the text stage
+        cli_in text retry "$@"
+        run_stages "$1"
+        ;;
+
+    promote-images)
+        [ $# -ge 1 ] || die "Usage: ./ebook-gen promote-images STORY_ID --mode draft|final"
+        ensure_system
+        start_server
+        cli_in images promote-images "$@"
+        # Rebuild the ebook from the new images (draft and final compile)
+        run_stages "$1"
+        ;;
+
+    tui)
+        ensure_system
+        start_server
+        NEEDS_HF=1 run_in dev python -m ebook_gen.tui "$@"
+        ;;
+
+    test)
+        ensure_system
+        run_in dev sh -c 'cd code && exec pytest tests/ "$@"' pytest "$@"
+        ;;
+
+    lint)
+        ensure_system
+        run_in dev sh -c 'cd code && exec ruff check ebook_gen/ tests/ "$@"' ruff "$@"
+        ;;
+
+    format)
+        ensure_system
+        run_in dev sh -c 'cd code && exec ruff format ebook_gen/ tests/ "$@"' ruff "$@"
+        ;;
+
+    shell)
+        ensure_system
+        run_in "${1:-dev}" bash
+        ;;
+
+    *)
+        # status, preview-images, --version, ...: no models needed
+        ensure_system
+        cli_in text "$cmd" "$@"
+        ;;
+esac

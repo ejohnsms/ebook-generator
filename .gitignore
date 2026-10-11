@@ -34,9 +34,13 @@ htmlcov/
 *.swo
 *~
 
-# pixi
+# pixi (solved inside the container images)
 .pixi/
 pixi.lock
+
+# ./ebook-gen state (model server token, pid, log) and the model server env
+.ebook-gen/
+model-server/.venv/
 
 # Output directories (content is generated)
 stories/*/

@@ -1,0 +1,9 @@
+step,name,status,started_at,completed_at,error_message,attempts,output_artifact
+1,story_fetch,completed,2026-10-11T01:23:32.106252,2026-10-11T01:23:32.230700,,1,projects/little_red_riding_hood_fairy_tale_dark/raw.md
+2,story_modification,completed,2026-10-11T01:23:32.276986,2026-10-11T01:26:37.718711,,1,projects/little_red_riding_hood_fairy_tale_dark/story.md
+3,content_rating,completed,2026-10-11T01:26:37.720727,2026-10-11T01:27:23.142897,,1,projects/little_red_riding_hood_fairy_tale_dark/metadata.json
+4,translation,completed,2026-10-11T01:27:23.145018,2026-10-11T01:27:23.147510,,1,projects/little_red_riding_hood_fairy_tale_dark/story.md
+5,prompt_generation,completed,2026-10-11T01:27:23.148944,2026-10-11T01:28:53.139870,,1,projects/little_red_riding_hood_fairy_tale_dark/prompts/prompts.csv
+6,image_generation,completed,2026-10-11T01:33:16.014970,2026-10-11T01:34:13.307630,,2,projects/little_red_riding_hood_fairy_tale_dark/images
+7,ebook_compilation,completed,2026-10-11T01:37:41.892642,2026-10-11T01:37:42.458796,,3,"projects/little_red_riding_hood_fairy_tale_dark/compiled/little_red_riding_hood_fairy_tale_dark_en_draft.epub,projects/little_red_riding_hood_fairy_tale_dark/compiled/little_red_riding_hood_fairy_tale_dark_en_draft.pdf"
+8,audio_generation,pending,,,,0,

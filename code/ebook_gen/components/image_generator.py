@@ -4,8 +4,8 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..backends import BackendError, GenerationBackend
 from ..models import ImageRecord, ImageStatus, StoryConfig
-from ..ollama.client import OllamaClient, OllamaError
 from ..utils.csv_io import read_image_records, write_image_records
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ class ImageGenOutput:
 
 
 class ImageGenerator:
-    """Generates images from prompts CSV using Ollama.
+    """Generates images from prompts CSV using the model backend.
 
     Reads prompts.csv, generates images for each pending or failed record,
     saves them as PNG files, and updates the CSV status after each image.
@@ -39,20 +39,20 @@ class ImageGenerator:
     are generated.
     """
 
-    def __init__(self, ollama_client: OllamaClient):
+    def __init__(self, backend: GenerationBackend):
         """Initialize image generator.
 
         Args:
-            ollama_client: Ollama client for image generation
+            backend: Model backend for image generation
         """
-        self._ollama = ollama_client
+        self._backend = backend
 
     def execute(self, input_data: ImageGenInput) -> ImageGenOutput:
         """Generate images from prompts CSV.
 
         For each ImageRecord where status is not 'completed':
           1. Mark as in_progress and write CSV.
-          2. Call Ollama image generation API.
+          2. Call the backend image generation API.
           3. Save PNG to output_dir/target_filename.
           4. Update status to 'completed' or 'failed'.
           5. Write CSV atomically after each image.
@@ -94,7 +94,7 @@ class ImageGenerator:
             write_image_records(input_data.prompts_csv_path, records)
 
             try:
-                image_bytes = self._ollama.generate_image(
+                image_bytes = self._backend.generate_image(
                     model=record.model,
                     prompt=record.prompt,
                     width=record.width,
@@ -109,7 +109,7 @@ class ImageGenerator:
                 completed += 1
                 logger.info(f"Saved image: {output_path}")
 
-            except OllamaError as e:
+            except BackendError as e:
                 record.status = ImageStatus.FAILED
                 failed += 1
                 logger.error(f"Failed to generate image '{record.name}': {e}")

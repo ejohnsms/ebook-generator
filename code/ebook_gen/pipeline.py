@@ -1,6 +1,7 @@
 """Pipeline orchestration for ebook generation."""
 
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -12,10 +13,9 @@ from .components.image_generator import ImageGenInput, ImageGenerator
 from .components.prompt_generator import PromptGenInput, PromptGenerator
 from .components.story_modifier import StoryModifyInput, StoryModifier
 from .components.translator import TranslateInput, Translator
-from .components.file_fetcher import FileFetcher
-from .config import OllamaConfig, ProjectConfig
-from .models import PIPELINE_STEPS, StepStatus, StoryConfig
-from .ollama.client import OllamaClient, OllamaError
+from .backends import GenerationBackend, create_backend
+from .config import BackendConfig, BackendKind, ProjectConfig
+from .models import MODEL_STEPS, PIPELINE_STAGES, PIPELINE_STEPS, StepStatus, StoryConfig
 from .progress import ProgressTracker
 
 # Configure logging
@@ -32,6 +32,23 @@ class PipelineError(Exception):
     pass
 
 
+def current_stage() -> Optional[str]:
+    """The stage this process runs (EBOOK_GEN_STAGE), or None for all steps.
+
+    Each pipeline container sets it; the ./ebook-gen wrapper runs the other
+    stages in their own containers.
+
+    Raises:
+        PipelineError: EBOOK_GEN_STAGE names an unknown stage
+    """
+    stage = os.getenv("EBOOK_GEN_STAGE") or None
+    if stage and stage not in PIPELINE_STAGES:
+        raise PipelineError(
+            f"Unknown EBOOK_GEN_STAGE '{stage}'; expected one of {', '.join(PIPELINE_STAGES)}"
+        )
+    return stage
+
+
 class PipelineRunner:
     """Orchestrates the 8-step ebook generation pipeline.
 
@@ -43,25 +60,28 @@ class PipelineRunner:
         self,
         story_config: StoryConfig,
         project_config: ProjectConfig,
-        ollama_config: Optional[OllamaConfig] = None,
+        backend_config: Optional[BackendConfig] = None,
     ):
         """Initialize pipeline runner.
 
         Args:
             story_config: Configuration for the story
             project_config: Project directory configuration
-            ollama_config: Ollama client configuration (optional)
+            backend_config: Model backend selection (optional; default from env)
         """
         self._story_config = story_config
         self._project = project_config
-        self._ollama_config = ollama_config or OllamaConfig.from_env()
+        self._backend_config = backend_config or BackendConfig.from_env()
+
+        # In a pipeline container, only this stage's steps run here
+        self._stage = current_stage()
 
         # Initialize progress tracker
         progress_dir = self._project.get_progress_dir(story_config.story_id)
         self._progress = ProgressTracker(progress_dir)
 
-        # Ollama client (created lazily)
-        self._ollama: Optional[OllamaClient] = None
+        # Model backend (created lazily)
+        self._backend: Optional[GenerationBackend] = None
 
     def run(self, start_from_step: int = 1, end_at_step: int = 6) -> None:
         """Execute the pipeline from start_from_step to end_at_step.
@@ -82,16 +102,7 @@ class PipelineRunner:
         if not self._progress.get_steps():
             self._progress.load()
 
-        # Initialize Ollama client
-        self._ollama = OllamaClient(self._ollama_config)
-
         try:
-            # Check Ollama health
-            if not self._ollama.health_check():
-                raise PipelineError(
-                    f"Cannot connect to Ollama at {self._ollama_config.base_url}"
-                )
-
             # Execute each step
             for step_num, step_name in PIPELINE_STEPS:
                 if step_num < start_from_step or step_num > end_at_step:
@@ -101,6 +112,15 @@ class PipelineRunner:
                 if self._progress.is_step_completed(step_num):
                     logger.info(f"Step {step_num} ({step_name}) already completed")
                     continue
+
+                if not self._in_stage(step_num, step_name):
+                    break
+
+                # Model steps need the backend; compile and audio don't
+                if step_num in MODEL_STEPS and self._backend is None:
+                    self._backend = create_backend(self._backend_config)
+                    if not self._backend.health_check():
+                        raise PipelineError(self._backend_unavailable_message())
 
                 logger.info(f"Executing step {step_num}: {step_name}")
                 self._execute_step(step_num, step_name)
@@ -112,9 +132,57 @@ class PipelineRunner:
             raise PipelineError(f"Pipeline failed: {e}") from e
 
         finally:
-            # Close Ollama client
-            if self._ollama:
-                self._ollama.close()
+            # Release HTTP connections / loaded models
+            if self._backend:
+                self._backend.close()
+                self._backend = None
+
+    def _in_stage(self, step_num: int, step_name: str) -> bool:
+        """Whether this process runs step_num; False once past this stage's steps.
+
+        Raises:
+            PipelineError: An earlier stage's step is still incomplete
+        """
+        if self._stage is None:
+            return True
+        steps = PIPELINE_STAGES[self._stage]
+        if step_num in steps:
+            return True
+        if step_num < min(steps):
+            raise PipelineError(
+                f"Step {step_num} ({step_name}) must complete before the "
+                f"'{self._stage}' stage can run"
+            )
+        logger.info(f"Steps after {max(steps)} run outside the '{self._stage}' stage")
+        return False
+
+    def planned_end_step(self) -> int:
+        """Last step for this story: preview stops after images, audio adds step 8."""
+        if self._story_config.image_mode.value == "preview":
+            return 6
+        if self._story_config.audio_languages:
+            return 8
+        return 7
+
+    def is_finished(self) -> bool:
+        """Whether every step up to planned_end_step() is completed."""
+        return all(
+            self._progress.is_step_completed(step)
+            for step in range(1, self.planned_end_step() + 1)
+        )
+
+    def _backend_unavailable_message(self) -> str:
+        if self._backend_config.kind == BackendKind.OLLAMA:
+            return f"Cannot connect to Ollama at {self._backend_config.ollama.base_url}"
+        if self._backend_config.kind == BackendKind.REMOTE:
+            return (
+                f"Cannot reach the model server at {self._backend_config.model_server.url}. "
+                "Start it with './ebook-gen model-server start'."
+            )
+        return (
+            "MLX backend unavailable: it needs macOS on Apple Silicon with mlx installed. "
+            "Set EBOOK_GEN_BACKEND=ollama to use Ollama instead."
+        )
 
     def resume(self) -> None:
         """Resume pipeline from the first non-completed step.
@@ -132,13 +200,7 @@ class PipelineRunner:
             return
 
         logger.info(f"Resuming from step {resume_step}")
-        if self._story_config.image_mode.value == "preview":
-            end_step = 6
-        elif self._story_config.audio_languages:
-            end_step = 8
-        else:
-            end_step = 7
-        self.run(start_from_step=resume_step, end_at_step=end_step)
+        self.run(start_from_step=resume_step, end_at_step=self.planned_end_step())
 
     def _execute_step(self, step_num: int, step_name: str) -> None:
         """Execute a single pipeline step.
@@ -206,7 +268,8 @@ class PipelineRunner:
         Returns:
             WikiFetchOutput
         """
-        from pathlib import Path
+        # Imported here: the fetchers need markdownify, which only the text image has
+        from .components.file_fetcher import FileFetcher
 
         story_dir = self._project.get_story_dir(self._story_config.story_id)
         story_dir.mkdir(parents=True, exist_ok=True)
@@ -237,7 +300,7 @@ class PipelineRunner:
                 f"Run step 1 (Wikipedia fetch) first."
             )
 
-        modifier = StoryModifier(self._ollama)
+        modifier = StoryModifier(self._backend)
         input_data = StoryModifyInput(
             raw_markdown_path=raw_path,
             story_config=self._story_config,
@@ -263,7 +326,7 @@ class PipelineRunner:
                 f"Run step 2 (Story modification) first."
             )
 
-        rater = ContentRater(self._ollama)
+        rater = ContentRater(self._backend)
         input_data = ContentRateInput(
             story_markdown_path=story_path,
             story_config=self._story_config,
@@ -289,7 +352,7 @@ class PipelineRunner:
                 f"Run step 3 (Content rating) first."
             )
 
-        translator = Translator(self._ollama)
+        translator = Translator(self._backend)
         input_data = TranslateInput(
             story_markdown_path=story_path,
             story_config=self._story_config,
@@ -318,7 +381,7 @@ class PipelineRunner:
                 f"Run previous steps first."
             )
 
-        generator = PromptGenerator(self._ollama)
+        generator = PromptGenerator(self._backend)
         input_data = PromptGenInput(
             story_markdown_path=story_path,
             story_config=self._story_config,
@@ -348,7 +411,7 @@ class PipelineRunner:
                 f"Run step 5 (prompt generation) first."
             )
 
-        generator = ImageGenerator(self._ollama)
+        generator = ImageGenerator(self._backend)
         input_data = ImageGenInput(
             prompts_csv_path=prompts_csv,
             story_config=self._story_config,

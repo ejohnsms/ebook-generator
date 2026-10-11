@@ -6,6 +6,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+from .config import (
+    DEFAULT_IMAGE_MODEL_DRAFT,
+    DEFAULT_IMAGE_MODEL_FINAL,
+    DEFAULT_IMAGE_MODEL_PREVIEW,
+    DEFAULT_TEXT_MODEL,
+)
+
 
 # Available image styles: (display_label, prompt_value)
 IMAGE_STYLES = [
@@ -44,6 +51,7 @@ class ContentRating(Enum):
     PG = "PG"
     PG13 = "PG-13"
     R = "R"
+    NC17 = "NC-17"
 
 
 class ImageMode(Enum):
@@ -84,6 +92,11 @@ class StepStatus(Enum):
     SKIPPED = "skipped"
 
 
+def _model_field(data: dict, key: str, default: str) -> str:
+    """Read a model name, falling back to the pre-MLX ``ollama_<key>`` field."""
+    return data.get(key) or data.get(f"ollama_{key}") or default
+
+
 @dataclass
 class StoryConfig:
     """Configuration for a story generation run."""
@@ -95,11 +108,11 @@ class StoryConfig:
     theme: Theme = Theme.UNMODIFIED
     content_rating: ContentRating = ContentRating.NONE
     target_languages: list[str] = field(default_factory=lambda: ["en"])
-    ollama_text_model: str = "llama3.1:8b"
-    ollama_prompt_model: str = "brxce/stable-diffusion-prompt-generator"
-    ollama_image_model_preview: str = "x/flux2-klein:4b"
-    ollama_image_model_draft: str = "x/flux2-klein:4b"
-    ollama_image_model_final: str = "x/flux2-klein:9b"
+    text_model: str = DEFAULT_TEXT_MODEL
+    prompt_model: str = DEFAULT_TEXT_MODEL
+    image_model_preview: str = DEFAULT_IMAGE_MODEL_PREVIEW
+    image_model_draft: str = DEFAULT_IMAGE_MODEL_DRAFT
+    image_model_final: str = DEFAULT_IMAGE_MODEL_FINAL
     image_mode: ImageMode = ImageMode.PREVIEW
     layout_style: str = "traditional"  # Layout style: traditional, manga, graphic-novel, webtoon, cinematic
     image_style: str = "photo-realistic"  # Visual style injected into every image prompt
@@ -118,11 +131,11 @@ class StoryConfig:
             "theme": self.theme.value,
             "content_rating": self.content_rating.value,
             "target_languages": self.target_languages,
-            "ollama_text_model": self.ollama_text_model,
-            "ollama_prompt_model": self.ollama_prompt_model,
-            "ollama_image_model_preview": self.ollama_image_model_preview,
-            "ollama_image_model_draft": self.ollama_image_model_draft,
-            "ollama_image_model_final": self.ollama_image_model_final,
+            "text_model": self.text_model,
+            "prompt_model": self.prompt_model,
+            "image_model_preview": self.image_model_preview,
+            "image_model_draft": self.image_model_draft,
+            "image_model_final": self.image_model_final,
             "image_mode": self.image_mode.value,
             "layout_style": self.layout_style,
             "image_style": self.image_style,
@@ -143,13 +156,14 @@ class StoryConfig:
             theme=Theme(data.get("theme", "unmodified")),
             content_rating=ContentRating(data.get("content_rating", "none")),
             target_languages=data.get("target_languages", ["en"]),
-            ollama_text_model=data.get("ollama_text_model", "llama3.1:8b"),
-            ollama_prompt_model=data.get(
-                "ollama_prompt_model", "brxce/stable-diffusion-prompt-generator"
+            # Older metadata.json files use ollama_* keys; read them as a fallback.
+            text_model=_model_field(data, "text_model", DEFAULT_TEXT_MODEL),
+            prompt_model=_model_field(data, "prompt_model", DEFAULT_TEXT_MODEL),
+            image_model_preview=_model_field(
+                data, "image_model_preview", DEFAULT_IMAGE_MODEL_PREVIEW
             ),
-            ollama_image_model_preview=data.get("ollama_image_model_preview", "x/flux2-klein:4b"),
-            ollama_image_model_draft=data.get("ollama_image_model_draft", "x/flux2-klein:4b"),
-            ollama_image_model_final=data.get("ollama_image_model_final", "x/flux2-klein:9b"),
+            image_model_draft=_model_field(data, "image_model_draft", DEFAULT_IMAGE_MODEL_DRAFT),
+            image_model_final=_model_field(data, "image_model_final", DEFAULT_IMAGE_MODEL_FINAL),
             image_mode=ImageMode(data.get("image_mode", "preview")),
             layout_style=data.get("layout_style", "traditional"),
             image_style=data.get("image_style", "photo-realistic"),
@@ -307,3 +321,14 @@ PIPELINE_STEPS = [
     (7, "ebook_compilation"),
     (8, "audio_generation"),
 ]
+
+# Steps each pipeline container runs (EBOOK_GEN_STAGE, set in Containerfile).
+PIPELINE_STAGES = {
+    "text": (1, 2, 3, 4, 5),
+    "images": (6,),
+    "compile": (7,),
+    "audio": (8,),
+}
+
+# Steps that call the text or image model.
+MODEL_STEPS = frozenset({2, 3, 4, 5, 6})

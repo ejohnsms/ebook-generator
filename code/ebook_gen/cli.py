@@ -1,12 +1,13 @@
 """Command-line interface for ebook generation."""
 
 import json
+import os
 import sys
 from pathlib import Path
 
 import click
 
-from .config import ProjectConfig
+from .config import DEFAULT_TEXT_MODEL, ProjectConfig
 from .models import (
     ContentRating,
     IMAGE_STYLE_VALUES,
@@ -20,11 +21,9 @@ from .progress import ProgressTracker
 
 def get_project_config() -> ProjectConfig:
     """Get the project configuration from current directory."""
-    # In Docker, we're in /workspace
-    # When running locally, find the project root
+    # Containers run from /workspace (the project root); a shell in code/ uses its parent
     current = Path.cwd()
 
-    # Check if we're in /workspace (Docker) or find project root
     if current.name == "code":
         root = current.parent
     elif (current / "code").exists():
@@ -134,13 +133,13 @@ def cli():
 )
 @click.option(
     "--text-model",
-    default="llama3.1:8b",
-    help="Ollama model for text generation",
+    default=DEFAULT_TEXT_MODEL,
+    help="Text model: a Hugging Face MLX repo id (or an Ollama tag with EBOOK_GEN_BACKEND=ollama)",
 )
 @click.option(
     "--prompt-model",
-    default="brxce/stable-diffusion-prompt-generator",
-    help="Ollama model for prompt generation",
+    default=None,
+    help="Model that writes image prompts (default: same as --text-model)",
 )
 @click.option(
     "--image-mode",
@@ -205,8 +204,8 @@ def generate(title, theme, rating, languages, text_model, prompt_model, image_mo
         theme=Theme(theme),
         content_rating=ContentRating(rating),
         target_languages=list(languages),
-        ollama_text_model=text_model,
-        ollama_prompt_model=prompt_model,
+        text_model=text_model,
+        prompt_model=prompt_model or text_model,
         image_mode=ImageMode(image_mode),
         image_style=image_style,
         audio_languages=list(audio_languages),
@@ -235,11 +234,10 @@ def generate(title, theme, rating, languages, text_model, prompt_model, image_mo
         )
         return
 
-    # Determine step range based on image mode
-    # preview → steps 1-6 (no compilation, no audio)
-    # draft   → steps 1-7 (with ebook compilation) + step 8 if audio requested
-    # final   → steps 1-7 (with ebook compilation) + step 8 if audio requested
-    end_step = 6 if image_mode == "preview" else 7
+    # Tell the ./ebook-gen wrapper which story the later stage containers resume
+    story_id_file = os.getenv("EBOOK_GEN_STORY_ID_FILE")
+    if story_id_file:
+        Path(story_id_file).write_text(story_id)
 
     # Run pipeline
     click.echo("\n▶️  Starting pipeline execution...")
@@ -258,12 +256,11 @@ def generate(title, theme, rating, languages, text_model, prompt_model, image_mo
     from .pipeline import PipelineRunner
 
     try:
+        # preview → steps 1-6; draft/final → 1-7, plus step 8 if audio requested
         runner = PipelineRunner(config, project)
-        runner.run(start_from_step=1, end_at_step=end_step)
-
-        # Audio generation (step 8): draft and final modes with audio languages
-        if audio_languages and image_mode != "preview":
-            runner.run(start_from_step=8, end_at_step=8)
+        runner.run(start_from_step=1, end_at_step=runner.planned_end_step())
+        if not _report_finished(runner):
+            return
 
         images_dir_story = project.get_images_dir(story_id)
         click.echo("\n✅ Pipeline execution completed successfully!")
@@ -312,14 +309,6 @@ def resume(story_id):
         )
         sys.exit(1)
 
-    resume_step = tracker.get_resume_step()
-    if resume_step is None:
-        click.echo(f"✓ Pipeline for '{story_id}' is already complete!")
-        return
-
-    click.echo(f"▶️  Resuming pipeline for: {story_id}")
-    click.echo(f"   Starting from step {resume_step}")
-
     # Load story config from metadata
     story_dir = project.get_story_dir(story_id)
     metadata_path = story_dir / "metadata.json"
@@ -333,19 +322,59 @@ def resume(story_id):
 
     config = StoryConfig.from_dict(config_dict)
 
-    # Run pipeline
-    from .pipeline import PipelineRunner
+    from .models import PIPELINE_STAGES
+    from .pipeline import PipelineRunner, current_stage
+
+    runner = PipelineRunner(config, project)
+    resume_step = tracker.get_resume_step()
+    if resume_step is None or resume_step > runner.planned_end_step():
+        click.echo(f"✓ Pipeline for '{story_id}' is already complete!")
+        return
+
+    # A later stage's container picks the story up from here
+    stage = current_stage()
+    if stage and resume_step > max(PIPELINE_STAGES[stage]):
+        return
+
+    click.echo(f"▶️  Resuming pipeline for: {story_id}")
+    click.echo(f"   Starting from step {resume_step}")
 
     try:
-        runner = PipelineRunner(config, project)
         runner.resume()
 
-        click.echo("\n✅ Pipeline resumed successfully!")
-        _write_obsidian_note(config, project, story_id)
+        if _report_finished(runner):
+            click.echo("\n✅ Pipeline resumed successfully!")
+            _write_obsidian_note(config, project, story_id)
 
     except Exception as e:
         click.echo(f"\n❌ Resume failed: {e}", err=True)
         sys.exit(1)
+
+
+@cli.command(hidden=True)
+@click.argument("story_id")
+def stages(story_id):
+    """Print the pipeline stages with steps left to run, one per line.
+
+    The ./ebook-gen wrapper uses this to start only the containers a story
+    still needs (a preview run never reaches compile or audio).
+    """
+    from .models import PIPELINE_STAGES
+    from .pipeline import PipelineRunner
+
+    project = get_project_config()
+    with open(project.get_story_dir(story_id) / "metadata.json") as f:
+        config = StoryConfig.from_dict(json.load(f))
+
+    runner = PipelineRunner(config, project)
+    tracker = ProgressTracker(project.get_progress_dir(story_id))
+    tracker.load()
+    for stage, steps in PIPELINE_STAGES.items():
+        if any(
+            step <= runner.planned_end_step() and not tracker.is_step_completed(step)
+            for step in steps
+        ):
+            click.echo(stage)
 
 
 @cli.command()
@@ -473,8 +502,9 @@ def retry(story_id, step):
     try:
         runner = PipelineRunner(config, project)
         runner.resume()
-        click.echo("\n✅ Retry completed successfully!")
-        _write_obsidian_note(config, project, story_id)
+        if _report_finished(runner):
+            click.echo("\n✅ Retry completed successfully!")
+            _write_obsidian_note(config, project, story_id)
     except Exception as e:
         click.echo(f"\n❌ Retry failed: {e}", err=True)
         sys.exit(1)
@@ -537,7 +567,8 @@ def preview_images(story_id):
     default="draft",
     help="Target quality tier: draft (medium-res, layout review) or final (full-res, publication)",
 )
-def promote_images(story_id, mode):
+@click.option("--yes", "-y", is_flag=True, help="Regenerate without asking if already in this mode")
+def promote_images(story_id, mode, yes):
     """Promote images to the next quality tier.
 
     Resets image statuses to 'pending', updates dimensions and model for the
@@ -565,7 +596,8 @@ def promote_images(story_id, mode):
 
     if config.image_mode == target_mode:
         click.echo(f"Images are already in '{mode}' mode.")
-        click.confirm("Regenerate anyway?", abort=True)
+        if not yes:
+            click.confirm("Regenerate anyway?", abort=True)
 
     # Update mode in config
     config.image_mode = target_mode
@@ -587,9 +619,9 @@ def promote_images(story_id, mode):
 
     # Select model for the target mode
     if target_mode == ImageMode.DRAFT:
-        new_model = config.ollama_image_model_draft
+        new_model = config.image_model_draft
     else:  # FINAL
-        new_model = config.ollama_image_model_final
+        new_model = config.image_model_final
 
     for record in records:
         record.status = ImageStatus.PENDING
@@ -604,6 +636,13 @@ def promote_images(story_id, mode):
 
     write_image_records(prompts_csv, records)
     click.echo(f"Reset {len(records)} image(s) to pending with {mode} dimensions")
+
+    # Regenerate the images, and rebuild the books made from the old ones;
+    # otherwise the completed step 6 is skipped and the records stay pending.
+    tracker = ProgressTracker(project.get_progress_dir(story_id))
+    tracker.load()
+    tracker.reset_step(6)
+    tracker.reset_step(7)
 
     # Run image generation
     click.echo(f"\n▶️  Running image generation in {mode} mode...")
@@ -621,6 +660,20 @@ def promote_images(story_id, mode):
         click.echo(f"\n❌ Image generation failed: {e}", err=True)
         click.echo(f"\n💡 Use 'ebook-gen retry {story_id} --step 6' to retry", err=True)
         sys.exit(1)
+
+
+def _report_finished(runner) -> bool:
+    """True if the story's pipeline is done; otherwise note this stage is done.
+
+    In a pipeline container only one stage runs, and the ./ebook-gen wrapper
+    starts the next stage's container afterwards.
+    """
+    if runner.is_finished():
+        return True
+    stage = os.getenv("EBOOK_GEN_STAGE")
+    if stage:
+        click.echo(f"\n✓ '{stage}' stage done")
+    return False
 
 
 def _write_obsidian_note(config: StoryConfig, project: ProjectConfig, story_id: str) -> None:

@@ -1,12 +1,16 @@
 """Obsidian note writer for completed ebook generation runs."""
 
+import os
 from datetime import datetime
 from pathlib import Path
 
 from ..models import StoryConfig
 from ..progress import ProgressTracker
 
-VAULT_DIR = Path.home() / "Documents" / "Obsidian" / "MyVault"
+# The ./ebook-gen wrapper mounts the vault into containers and sets OBSIDIAN_VAULT_DIR
+VAULT_DIR = Path(
+    os.getenv("OBSIDIAN_VAULT_DIR", Path.home() / "Documents" / "Obsidian" / "MyVault")
+)
 NOTE_SUBDIR = "Ebook Gen"
 
 _STATUS_ICON = {
@@ -32,8 +36,10 @@ def write_story_note(
 
     Returns the note path on success, None if the vault directory doesn't exist.
     """
+    if not VAULT_DIR.is_dir():
+        return None
     note_dir = VAULT_DIR / NOTE_SUBDIR
-    note_dir.mkdir(parents=True, exist_ok=True)
+    note_dir.mkdir(exist_ok=True)
 
     tracker = ProgressTracker(progress_dir)
     try:

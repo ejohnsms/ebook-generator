@@ -1,0 +1,15 @@
+# Host-side environment for the model server (code/ebook_gen/model_server.py).
+# It runs natively on macOS because MLX needs Metal, which the pipeline
+# containers can't reach. ./ebook-gen starts it with:
+#   uv run --project model-server python -m ebook_gen.model_server
+[project]
+name = "ebook-gen-model-server"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mlx-lm>=0.32",
+    "mflux>=0.22",
+]
+
+[tool.uv]
+package = false

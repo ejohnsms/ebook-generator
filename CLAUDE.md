@@ -10,58 +10,34 @@ This is a Python-based ebook generation pipeline that transforms stories (fetche
 1. Wikipedia Fetch - retrieve story source
 2. Story Modification - apply thematic transformations (cyberpunk, caribbean village, etc.)
 3. Content Rating - assign G, PG-13, etc. based on modifications
-4. Translation - translate to target languages using Ollama LLM
-5. Prompt Generation - create image prompts using `brxce/stable-diffusion-prompt-generator`
-6. Image Generation - generate illustrations using `x/flux2-klein` or `x/z-image-turbo`
+4. Translation - translate (with cultural adaptation) using the text model
+5. Prompt Generation - create image prompts using the text model
+6. Image Generation - generate illustrations with FLUX.2 Klein or Z-Image Turbo (mflux)
 7. Ebook Compilation - assemble story + images into ePub and PDF
 
 ## Development Environment
 
-**Stack:**
-- Docker + docker-compose (containerization)
-- pixi (package manager inside container)
-- Python 3.12+
-- Ollama (LLM and image generation service, runs as sibling container)
+**Everything runs through `./ebook-gen`, which runs each pipeline stage in an Apple `container` image (`brew install container`).** pixi only manages packages *inside* the images. Don't run `pixi install`/`pixi run` on the host.
 
-**Key commands:**
+- `Containerfile` builds one image per stage from a pixi environment in `pixi.toml` (platform `linux-aarch64`): `ebook-gen-text` (steps 1–5), `ebook-gen-images` (6), `ebook-gen-compile` (7, weasyprint + ebooklib), `ebook-gen-audio` (8, Kokoro TTS + espeak-ng on CPU), and `ebook-gen-dev` (tests, lint, TUI). Each image sets `EBOOK_GEN_STAGE`, and `PipelineRunner` only runs that stage's steps (`PIPELINE_STAGES` in `models.py`).
+- Containers can't reach Metal, so MLX runs in a **host model server** (`code/ebook_gen/model_server.py`, env in `model-server/` via uv). Images set `EBOOK_GEN_BACKEND=remote` and reach it at `192.168.64.1:8765` with a bearer token from `.ebook-gen/model-server.token`.
+- `./ebook-gen` starts `container system` if it's stopped, builds images that are missing or stale (hash of `Containerfile` + `pixi.toml`), starts the model server on demand, mounts the repo at `/workspace` and the `ebook-gen-hf` volume at `/hf` (not `HF_HOME`: a bind mount of the external-SSD cache hangs `container run`, since the runtime can't read removable volumes), and asks the hidden `ebook-gen stages STORY_ID` command which stage containers still need to run.
+- The `container` builder VM enables Rosetta by default and won't boot without it installed. The images are arm64, so instead `~/.config/container/config.toml` sets `[build] rosetta = false` (read when `container system start` runs).
+
+**Key commands** (`--file` accepts relative paths; files outside the repo are mounted read-only):
 
 ```bash
-# Start all services (app + Ollama)
-docker-compose up
-
-# Run the CLI inside container
-docker-compose exec app pixi run ebook-gen --help
-
-# Generate an ebook (sample images)
-docker-compose exec app pixi run ebook-gen generate "Three Billy Goats Gruff" \
-  --theme cyberpunk \
-  --rating PG-13 \
-  --languages en es \
-  --image-mode sample
-
-# Resume an interrupted run
-docker-compose exec app pixi run ebook-gen resume three-billy-goats-gruff
-
-# Check pipeline status
-docker-compose exec app pixi run ebook-gen status three-billy-goats-gruff
-
-# Preview generated images
-docker-compose exec app pixi run ebook-gen preview-images three-billy-goats-gruff
-
-# Promote sample images to full resolution
-docker-compose exec app pixi run ebook-gen promote-images three-billy-goats-gruff
-
-# Run tests
-docker-compose exec app pixi run test
-
-# Run tests with coverage
-docker-compose exec app pixi run test-cov
-
-# Lint
-docker-compose exec app pixi run lint
-
-# Format
-docker-compose exec app pixi run format
+./ebook-gen build                              # build all images
+./ebook-gen generate "Three Billy Goats Gruff" \
+  --file stories/three_billy_goats_gruff.txt \
+  --theme cyberpunk --rating PG-13 \
+  --languages en --languages es --image-mode preview
+./ebook-gen status <story_id>
+./ebook-gen resume <story_id>
+./ebook-gen promote-images <story_id> --mode draft
+./ebook-gen model-server start|stop|status|logs
+./ebook-gen test                               # pytest in the dev image
+./ebook-gen lint                               # ruff (pre-existing errors remain)
 ```
 
 ## Architecture
@@ -131,25 +107,17 @@ All annotations are stripped before ebook compilation.
 
 Both CSVs use atomic writes (write-to-temp-then-rename) to prevent corruption on crashes.
 
-### Ollama Integration
+### Model Backends
 
-**Models used:**
-- Text generation: `llama3.1:8b` (or configurable)
-- Prompt generation: `brxce/stable-diffusion-prompt-generator`
-- Image generation:
-  - Preview/Draft: `x/flux2-klein:4b` (4B params, faster)
-  - Final: `x/flux2-klein:9b` (9B params, higher quality)
+Components depend on `GenerationBackend` (`backends/base.py`): `generate_text(...)` and `generate_image(...)`. `create_backend()` picks the implementation from `EBOOK_GEN_BACKEND`: `remote` (set in the images; `RemoteBackend` calls the host model server), `mlx` (code default; what the model server runs), or `ollama` (text only). `PipelineRunner` creates the backend only when a model step (2–6) runs, so the compile and audio containers don't need the model server.
 
-**Access pattern:**
-```bash
-# Prompt generation
-ollama run brxce/stable-diffusion-prompt-generator "story context + theme"
+**MLX defaults** (`config.py`):
+- Text, translation, rating and image prompts: `mlx-community/gemma-4-12B-it-qat-4bit`
+- Images, preview/draft: `mflux-community/flux2-klein-4b-mflux-q4` (Apache-2.0)
+- Images, final: `mflux-community/flux2-klein-9b-mflux-q4` (FLUX **non-commercial** license)
+- Alternative: `mflux-community/z-image-turbo-mflux-q8` (Apache-2.0)
 
-# Image generation
-ollama run x/flux2-klein "refined prompt text"
-```
-
-The `OllamaClient` wrapper handles retry logic, timeout handling, and error classification.
+`MLXBackend` keeps one model in memory at a time (24 GB machine) and maps legacy Ollama tags stored in old `metadata.json`/`prompts.csv` (e.g. `x/flux2-klein:4b`) to MLX repo ids via `LEGACY_MODEL_ALIASES`.
 
 ## Development Workflow
 
@@ -233,8 +201,8 @@ All file writes use atomic operations (write-to-temp-then-rename). Network opera
 
 **Run tests:**
 ```bash
-pixi run test          # All tests
-pixi run test-cov      # With coverage report
+./ebook-gen test                    # All tests (dev image)
+./ebook-gen test --cov=ebook_gen    # With coverage report
 ```
 
 ## Key Design Decisions
@@ -252,7 +220,7 @@ pixi run test-cov      # With coverage report
 
 ## Important Notes
 
-- **Never commit to main without tests passing** - Run `pixi run test` first
+- **Never commit to main without tests passing** - Run `./ebook-gen test` first
 - **Annotations must not break Markdown rendering** - Test story files in a Markdown previewer
 - **CSV writes must be atomic** - Use the `atomic_write()` helper in `utils/file_io.py`
 - **LLM outputs must be validated** - Check for required structure (chapters, annotations) before accepting

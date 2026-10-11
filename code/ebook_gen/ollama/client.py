@@ -5,10 +5,11 @@ from typing import Optional
 
 import httpx
 
+from ..backends.base import BackendError
 from ..config import OllamaConfig, RetryConfig
 
 
-class OllamaError(Exception):
+class OllamaError(BackendError):
     """Base exception for Ollama errors."""
 
     pass
@@ -111,15 +112,17 @@ class OllamaClient:
         prompt: str,
         system: str = "",
         temperature: float = 0.7,
+        max_tokens: int = 8192,
         stream: bool = False,
     ) -> str:
         """Generate text completion.
 
         Args:
-            model: Model name (e.g., "llama3.1:8b")
+            model: Model name (e.g., "gemma4:12b")
             prompt: User prompt
             system: System prompt (optional)
             temperature: Sampling temperature (0.0 to 1.0)
+            max_tokens: Cap on generated tokens (Ollama num_predict)
             stream: Whether to stream response (not implemented)
 
         Returns:
@@ -134,13 +137,15 @@ class OllamaClient:
             "model": model,
             "prompt": prompt,
             "stream": False,  # We always use non-streaming for simplicity
+            "think": False,  # skip reasoning on thinking models (gemma4); ignored by others
         }
 
         if system:
             payload["system"] = system
 
+        payload["options"] = {"num_predict": max_tokens}
         if temperature != 0.7:
-            payload["options"] = {"temperature": temperature}
+            payload["options"]["temperature"] = temperature
 
         # Retry logic
         for attempt in range(self._retry_config.max_attempts):
@@ -242,6 +247,8 @@ class OllamaClient:
                             f"Model '{model}' not found. Pull it with: ollama pull {model}"
                         )
 
+                    if response.is_error:
+                        response.read()  # load the body so the error handler can read .text
                     response.raise_for_status()
 
                     image_b64: str | None = None

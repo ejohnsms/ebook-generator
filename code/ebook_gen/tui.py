@@ -24,7 +24,7 @@ from textual.widgets import (
 
 from .cli import build_story_id, get_project_config, slugify
 from .components.audio_generator import KOKORO_LANG_MAP
-from .config import OllamaConfig
+from .config import BackendConfig
 from .models import (
     IMAGE_STYLES,
     PIPELINE_STEPS,
@@ -451,9 +451,9 @@ class EbookGeneratorApp(App):
 
         succeeded = False
         try:
-            ollama_config = OllamaConfig.from_env()
+            backend_config = BackendConfig.from_env()
 
-            runner = PipelineRunner(config, project, ollama_config)
+            runner = PipelineRunner(config, project, backend_config)
 
             # Mode-aware step range:
             #   preview → steps 1-6 (images only, no compilation, no audio)

@@ -258,6 +258,7 @@ class TestEnums:
         """Test ContentRating enum values."""
         assert ContentRating.G.value == "G"
         assert ContentRating.PG13.value == "PG-13"
+        assert ContentRating.NC17.value == "NC-17"
         assert ContentRating.NONE.value == "none"
 
     def test_image_mode_values(self):

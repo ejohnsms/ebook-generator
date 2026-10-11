@@ -4,8 +4,8 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..backends import GenerationBackend
 from ..models import ContentRating, StoryConfig, Theme
-from ..ollama.client import OllamaClient
 from ..utils.file_io import safe_read_text, safe_write_text
 from ..utils.markdown import insert_annotation
 
@@ -36,13 +36,13 @@ class ContentRater:
     annotations to justify the rating assignment.
     """
 
-    def __init__(self, ollama_client: OllamaClient):
+    def __init__(self, backend: GenerationBackend):
         """Initialize content rater.
 
         Args:
-            ollama_client: Ollama client for LLM analysis
+            backend: Model backend for LLM analysis
         """
-        self._ollama = ollama_client
+        self._backend = backend
 
     def execute(self, input_data: ContentRateInput) -> ContentRateOutput:
         """Analyze story and assign content rating.
@@ -55,7 +55,7 @@ class ContentRater:
 
         Raises:
             FileNotFoundError: If story file doesn't exist
-            OllamaError: If LLM analysis fails
+            BackendError: If LLM analysis fails
         """
         # Read story
         story_text = safe_read_text(input_data.story_markdown_path)
@@ -106,14 +106,14 @@ class ContentRater:
             where passages is a list of dicts with 'text' and 'reason'
 
         Raises:
-            OllamaError: If LLM analysis fails
+            BackendError: If LLM analysis fails
         """
         system_prompt = self._build_rating_system_prompt()
         user_prompt = self._build_rating_user_prompt(story_text, config)
 
         # Generate analysis
-        response = self._ollama.generate_text(
-            model=config.ollama_text_model,
+        response = self._backend.generate_text(
+            model=config.text_model,
             prompt=user_prompt,
             system=system_prompt,
             temperature=0.3,  # Lower temp for analytical task
@@ -134,7 +134,7 @@ class ContentRater:
         """
         return """You are a content rating analyst. Your task is to analyze story content and:
 1. Identify potentially sensitive content (violence, language, themes, etc.)
-2. Assess appropriate content rating (G, PG, PG-13, R)
+2. Assess appropriate content rating (G, PG, PG-13, R, NC-17)
 3. Justify the rating with specific examples
 4. Flag specific passages that influenced the rating
 
@@ -168,7 +168,7 @@ Story:
 
 Output JSON format:
 {{
-  "recommended_rating": "G|PG|PG-13|R",
+  "recommended_rating": "G|PG|PG-13|R|NC-17",
   "matches_target": true|false,
   "justification": "Brief explanation of rating",
   "sensitive_passages": [

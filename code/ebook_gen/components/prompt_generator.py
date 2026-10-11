@@ -4,8 +4,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..backends import GenerationBackend
 from ..models import ImageMode, ImageRecord, ImageStatus, StoryConfig
-from ..ollama.client import OllamaClient
 from ..utils.csv_io import write_image_records
 from ..utils.file_io import safe_read_text
 from ..utils.markdown import Annotation, extract_annotations, split_into_sections
@@ -32,7 +32,7 @@ class PromptGenerator:
     """Generates image prompts from story annotations.
 
     Extracts <!-- IMAGE: ... --> annotations from story and uses
-    Ollama to generate detailed, refined prompts for image generation.
+    the model backend to generate detailed, refined prompts for image generation.
     Creates prompts.csv with all image metadata.
     """
 
@@ -63,8 +63,12 @@ class PromptGenerator:
         "unmodified": "",
     }
 
-    def __init__(self, ollama_client: OllamaClient):
-        self._ollama = ollama_client
+    # An image prompt is a sentence or two. Capping output also stops models that
+    # never emit an end token from running until the HTTP timeout.
+    _PROMPT_MAX_TOKENS = 300
+
+    def __init__(self, backend: GenerationBackend):
+        self._backend = backend
 
     def execute(self, input_data: PromptGenInput) -> PromptGenOutput:
         story_text = safe_read_text(input_data.story_markdown_path)
@@ -143,16 +147,17 @@ class PromptGenerator:
             image_description, synopsis, config
         )
 
-        refined_prompt = self._ollama.generate_text(
-            model=config.ollama_prompt_model,
+        refined_prompt = self._backend.generate_text(
+            model=config.prompt_model,
             prompt=user_prompt,
             system=system_prompt,
             temperature=0.7,
+            max_tokens=self._PROMPT_MAX_TOKENS,
         )
 
         # Belt-and-suspenders: always append style + theme keywords so the
         # image generator sees them even if the LLM output was weak.
-        parts = [refined_prompt.strip(), config.image_style]
+        parts = [self._clean_prompt(refined_prompt), config.image_style]
         theme_keywords = self._THEME_VISUAL_KEYWORDS.get(config.theme.value, "")
         if theme_keywords:
             parts.append(theme_keywords)
@@ -180,19 +185,29 @@ class PromptGenerator:
             f"Create a compelling cover image prompt:"
         )
 
-        refined_prompt = self._ollama.generate_text(
-            model=config.ollama_prompt_model,
+        refined_prompt = self._backend.generate_text(
+            model=config.prompt_model,
             prompt=user_prompt,
             system=system_prompt,
             temperature=0.8,
+            max_tokens=self._PROMPT_MAX_TOKENS,
         )
 
-        parts = [refined_prompt.strip(), config.image_style]
+        parts = [self._clean_prompt(refined_prompt), config.image_style]
         theme_keywords = self._THEME_VISUAL_KEYWORDS.get(config.theme.value, "")
         if theme_keywords:
             parts.append(theme_keywords)
 
         return ", ".join(parts)
+
+    @staticmethod
+    def _clean_prompt(text: str) -> str:
+        """Strip chat-model wrapping: a "Prompt:" label, markdown, quotes, line breaks."""
+        text = text.strip()
+        text = re.sub(r"^\W*(?:image\s+)?prompt\W*:\W*", "", text, flags=re.IGNORECASE)
+        text = text.replace("**", "")
+        text = re.sub(r"\s+", " ", text).strip()
+        return text.strip("\"'“”‘’` ")
 
     # ── prompt building ──────────────────────────────────────────────────────
 
@@ -301,11 +316,11 @@ class PromptGenerator:
 
     def _select_model(self, config: StoryConfig) -> str:
         if config.image_mode == ImageMode.PREVIEW:
-            return config.ollama_image_model_preview
+            return config.image_model_preview
         elif config.image_mode == ImageMode.DRAFT:
-            return config.ollama_image_model_draft
+            return config.image_model_draft
         else:
-            return config.ollama_image_model_final
+            return config.image_model_final
 
     def _get_width(self, config: StoryConfig) -> int:
         if config.image_mode == ImageMode.PREVIEW:
