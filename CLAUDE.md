@@ -32,6 +32,7 @@ This is a Python-based ebook generation pipeline that transforms stories (fetche
   --file stories/three_billy_goats_gruff.txt \
   --theme cyberpunk --rating PG-13 \
   --languages en --languages es --image-mode preview
+./ebook-gen themes                             # list themes from themes.toml
 ./ebook-gen status <story_id>
 ./ebook-gen resume <story_id>
 ./ebook-gen promote-images <story_id> --mode draft
@@ -68,6 +69,16 @@ root/
 ├── stories/           # Input: annotated story markdown files
 └── progress/          # Pipeline state CSVs (for resume capability)
 ```
+
+### Themes
+
+Themes and romance tropes live in `themes.toml` at the repo root (`code/ebook_gen/themes.py` loads and validates it). Each theme table has `name`, `description`, `story_prompt` (system prompt for step 2's rewrite), `motif_map` (how Thompson Motif-Index chapters appear in the setting) and `image_keywords` (given to the prompt model and appended to every image prompt in step 5), plus optional `adult = true`. The table key is the `--theme` value and becomes part of the story ID. Add a table to add a theme; no image rebuild is needed since the repo is mounted.
+
+- `[defaults]` holds the shared prompt templates (step 2's rewrite request, the adult rules, the trope request, adult image keywords, step 5's scene and cover prompts), with `{placeholders}` checked at load time. A theme table can override any of them.
+- The rewrite request asks the model to keep the tale's ATU type and core motifs, changing their surface through the motif map. Themes cover settings (cyberpunk, steampunk…), the seven ATU divisions (animal fable … formula tale), and adult romance genres.
+- `[tropes.KEY]` tables are romance tropes, picked with repeatable `--trope` (stored in `StoryConfig.tropes`, appended to the story ID). Tropes need a theme other than `unmodified`.
+- Adult themes and any trope add `adult_rules` to the rewrite (everyone in a romantic or sexual scene is an adult; child characters are always aged up) and `adult_image_keywords` to image prompts (adults, clothed, suggestive rather than explicit).
+- `unmodified` is built in; its `[unmodified]` table only takes name, description and template overrides. `StoryConfig.theme` is the key as a string.
 
 ### Story File Format
 
@@ -150,7 +161,8 @@ The system supports a three-stage workflow to minimize GPU time while maximizing
 # 1. Preview - Quick prompt testing (minutes)
 ebook-gen generate "Story" --theme cyberpunk --image-mode preview
 ebook-gen preview-images story-id
-# Edit prompts if needed: prompts/story-id/prompts.csv
+# Edit prompts if needed: projects/story-id/prompts/prompts.csv, setting
+# each edited row's status to pending (step 6 skips completed rows)
 ebook-gen retry story-id --step 6
 
 # 2. Draft - Layout review (tens of minutes)
@@ -251,7 +263,6 @@ See `PROMPT_ENHANCEMENT.md` for detailed documentation.
 ## Future Enhancements
 
 Potential areas for extension (not currently implemented):
-- YAML-based theme registry (currently hard-coded in Python)
 - Batch story processing
 - Parallel image generation across multiple Ollama instances
 - Custom cover image upload option

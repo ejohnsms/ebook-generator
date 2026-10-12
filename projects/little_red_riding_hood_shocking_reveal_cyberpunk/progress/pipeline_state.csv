@@ -1,0 +1,9 @@
+step,name,status,started_at,completed_at,error_message,attempts,output_artifact
+1,story_fetch,completed,2026-10-11T20:57:18.858363,2026-10-11T20:57:18.978377,,1,projects/little_red_riding_hood_shocking_reveal_cyberpunk/raw.md
+2,story_modification,completed,2026-10-11T20:57:19.022751,2026-10-11T21:00:45.248767,,1,projects/little_red_riding_hood_shocking_reveal_cyberpunk/story.md
+3,content_rating,completed,2026-10-11T21:00:45.250759,2026-10-11T21:01:34.904735,,1,projects/little_red_riding_hood_shocking_reveal_cyberpunk/metadata.json
+4,translation,completed,2026-10-11T21:01:34.907195,2026-10-11T21:01:34.910036,,1,projects/little_red_riding_hood_shocking_reveal_cyberpunk/story.md
+5,prompt_generation,completed,2026-10-11T21:01:34.911730,2026-10-11T21:03:44.076295,,1,projects/little_red_riding_hood_shocking_reveal_cyberpunk/prompts/prompts.csv
+6,image_generation,completed,2026-10-11T21:03:46.012383,2026-10-11T21:04:24.460301,,1,projects/little_red_riding_hood_shocking_reveal_cyberpunk/images
+7,ebook_compilation,pending,,,,0,
+8,audio_generation,pending,,,,0,

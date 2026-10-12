@@ -5,7 +5,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..backends import GenerationBackend
-from ..models import ContentRating, StoryConfig, Theme
+from ..models import ContentRating, StoryConfig
+from ..themes import UNMODIFIED
 from ..utils.file_io import safe_read_text, safe_write_text
 from ..utils.markdown import insert_annotation
 
@@ -61,7 +62,7 @@ class ContentRater:
         story_text = safe_read_text(input_data.story_markdown_path)
 
         # Handle UNMODIFIED theme separately
-        if input_data.story_config.theme == Theme.UNMODIFIED:
+        if input_data.story_config.theme == UNMODIFIED:
             rating = ContentRating.NONE
             justification = "Unmodified story, no rating assigned"
             # Don't modify the story text for unmodified theme

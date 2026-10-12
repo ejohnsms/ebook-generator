@@ -5,7 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 
 from ebook_gen.components.image_generator import ImageGenerator, ImageGenInput, ImageGenOutput
-from ebook_gen.models import ImageMode, ImageRecord, ImageStatus, StoryConfig, Theme, ContentRating
+from ebook_gen.models import ImageMode, ImageRecord, ImageStatus, StoryConfig, ContentRating
 from ebook_gen.ollama.client import OllamaClient, OllamaGenerationError, OllamaConnectionError
 from ebook_gen.utils.csv_io import read_image_records, write_image_records
 

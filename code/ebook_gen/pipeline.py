@@ -289,7 +289,7 @@ class PipelineRunner:
         Returns:
             StoryModifyOutput
         """
-        logger.info(f"Applying theme: {self._story_config.theme.value}...")
+        logger.info(f"Applying theme: {self._story_config.theme}...")
 
         story_dir = self._project.get_story_dir(self._story_config.story_id)
         raw_path = story_dir / "raw.md"

@@ -12,6 +12,7 @@ from .config import (
     DEFAULT_IMAGE_MODEL_PREVIEW,
     DEFAULT_TEXT_MODEL,
 )
+from .themes import UNMODIFIED
 
 
 # Available image styles: (display_label, prompt_value)
@@ -31,16 +32,34 @@ IMAGE_STYLES = [
 # Quick lookup: value → label (for display purposes)
 IMAGE_STYLE_VALUES = [v for _, v in IMAGE_STYLES]
 
+# Common translation target languages (broad set for LLM-based translation)
+TEXT_LANGUAGE_OPTIONS = [
+    ("English (en)", "en"),
+    ("Spanish (es)", "es"),
+    ("French (fr)", "fr"),
+    ("German (de)", "de"),
+    ("Portuguese (pt)", "pt"),
+    ("Italian (it)", "it"),
+    ("Japanese (ja)", "ja"),
+    ("Chinese (zh)", "zh"),
+    ("Korean (ko)", "ko"),
+    ("Russian (ru)", "ru"),
+    ("Arabic (ar)", "ar"),
+    ("Hindi (hi)", "hi"),
+]
 
-class Theme(Enum):
-    """Available story themes."""
-
-    UNMODIFIED = "unmodified"
-    CYBERPUNK = "cyberpunk"
-    CARIBBEAN_VILLAGE = "caribbean_village"
-    STEAMPUNK = "steampunk"
-    FAIRY_TALE_DARK = "fairy_tale_dark"
-    SPACE_OPERA = "space_opera"
+# Audio languages: only Kokoro-supported languages
+AUDIO_LANGUAGE_LABELS = {
+    "en": "English US (en)",
+    "en-gb": "English UK (en-gb)",
+    "es": "Spanish (es)",
+    "fr": "French (fr)",
+    "ja": "Japanese (ja)",
+    "zh": "Chinese (zh)",
+    "hi": "Hindi (hi)",
+    "it": "Italian (it)",
+    "pt": "Portuguese (pt)",
+}
 
 
 class ContentRating(Enum):
@@ -105,7 +124,8 @@ class StoryConfig:
     title: str  # human-readable title
     source_file: str  # path to the source .txt or .md file
     source_language: str = "en"
-    theme: Theme = Theme.UNMODIFIED
+    theme: str = UNMODIFIED  # a key in themes.toml
+    tropes: list[str] = field(default_factory=list)  # [tropes.KEY] keys in themes.toml
     content_rating: ContentRating = ContentRating.NONE
     target_languages: list[str] = field(default_factory=lambda: ["en"])
     text_model: str = DEFAULT_TEXT_MODEL
@@ -128,7 +148,8 @@ class StoryConfig:
             "title": self.title,
             "source_file": self.source_file,
             "source_language": self.source_language,
-            "theme": self.theme.value,
+            "theme": self.theme,
+            "tropes": self.tropes,
             "content_rating": self.content_rating.value,
             "target_languages": self.target_languages,
             "text_model": self.text_model,
@@ -153,7 +174,8 @@ class StoryConfig:
             title=data["title"],
             source_file=data["source_file"],
             source_language=data.get("source_language", "en"),
-            theme=Theme(data.get("theme", "unmodified")),
+            theme=data.get("theme", UNMODIFIED),
+            tropes=data.get("tropes", []),
             content_rating=ContentRating(data.get("content_rating", "none")),
             target_languages=data.get("target_languages", ["en"]),
             # Older metadata.json files use ollama_* keys; read them as a fallback.

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ..backends import GenerationBackend
 from ..models import ImageMode, ImageRecord, ImageStatus, StoryConfig
+from ..themes import adult_rules_apply, get_theme
 from ..utils.csv_io import write_image_records
 from ..utils.file_io import safe_read_text
 from ..utils.markdown import Annotation, extract_annotations, split_into_sections
@@ -37,32 +38,6 @@ class PromptGenerator:
     """
 
     # Concrete visual vocabulary for each theme.
-    # Appended to EVERY scene prompt regardless of LLM output so images
-    # stay on-theme even if the prompt generator model ignores instructions.
-    _THEME_VISUAL_KEYWORDS: dict[str, str] = {
-        "cyberpunk": (
-            "cyberpunk city, neon signs, rain-slicked streets, holographic displays, "
-            "dark dystopian atmosphere, toxic canal, corporate megastructures, LED lighting"
-        ),
-        "caribbean_village": (
-            "tropical Caribbean setting, vibrant colors, palm trees, warm golden sunlight, "
-            "colorful wooden buildings, turquoise water, coral reef, island atmosphere"
-        ),
-        "steampunk": (
-            "steampunk aesthetic, brass gears, copper pipes, Victorian architecture, "
-            "steam vents, gas lamp lighting, clockwork mechanisms, sepia tones, airships"
-        ),
-        "fairy_tale_dark": (
-            "dark enchanted forest, gnarled ancient trees, ethereal fog, mystical shadows, "
-            "ancient stone ruins, glowing runes, gothic atmosphere, moonlit"
-        ),
-        "space_opera": (
-            "alien landscape, starfield background, advanced spacecraft, alien flora, "
-            "galactic nebula, futuristic technology, twin moons, cosmic scale"
-        ),
-        "unmodified": "",
-    }
-
     # An image prompt is a sentence or two. Capping output also stops models that
     # never emit an end token from running until the HTTP timeout.
     _PROMPT_MAX_TOKENS = 300
@@ -158,7 +133,7 @@ class PromptGenerator:
         # Belt-and-suspenders: always append style + theme keywords so the
         # image generator sees them even if the LLM output was weak.
         parts = [self._clean_prompt(refined_prompt), config.image_style]
-        theme_keywords = self._THEME_VISUAL_KEYWORDS.get(config.theme.value, "")
+        theme_keywords = self._theme_visuals(config)
         if theme_keywords:
             parts.append(theme_keywords)
 
@@ -168,22 +143,10 @@ class PromptGenerator:
         """Generate the cover image prompt from a story synopsis."""
         synopsis = self._extract_synopsis(story_text, max_chars=600)
 
-        system_prompt = (
-            f"You are an expert at creating image prompts for cover illustrations.\n\n"
-            f"Create a dramatic, eye-catching cover image prompt for a {config.theme.value} "
-            f"story in {config.image_style} style.\n"
-            f"The cover should capture the essence of the theme, be visually striking, "
-            f"work well as a square image, and attract readers.\n\n"
-            f"Output ONLY the image prompt, no explanation."
-        )
-
-        user_prompt = (
-            f"Story synopsis:\n{synopsis}\n\n"
-            f"Theme: {config.theme.value}\n"
-            f"Visual style: {config.image_style}\n"
-            f"Rating: {config.content_rating.value}\n\n"
-            f"Create a compelling cover image prompt:"
-        )
+        theme = get_theme(config.theme)
+        values = self._template_values(config)
+        system_prompt = theme.render("cover_system", **values)
+        user_prompt = theme.render("cover_request", **values, synopsis=synopsis)
 
         refined_prompt = self._backend.generate_text(
             model=config.prompt_model,
@@ -194,7 +157,7 @@ class PromptGenerator:
         )
 
         parts = [self._clean_prompt(refined_prompt), config.image_style]
-        theme_keywords = self._THEME_VISUAL_KEYWORDS.get(config.theme.value, "")
+        theme_keywords = self._theme_visuals(config)
         if theme_keywords:
             parts.append(theme_keywords)
 
@@ -211,43 +174,40 @@ class PromptGenerator:
 
     # ── prompt building ──────────────────────────────────────────────────────
 
-    def _build_prompt_gen_system_prompt(self, config: StoryConfig) -> str:
-        theme_keywords = self._THEME_VISUAL_KEYWORDS.get(config.theme.value, "")
-        theme_line = (
-            f"Theme visual elements you MUST include: {theme_keywords}"
-            if theme_keywords
-            else f"Theme: {config.theme.value}"
-        )
+    @staticmethod
+    def _theme_visuals(config: StoryConfig) -> str:
+        """The theme's image keywords, plus the adult ones for adult themes and tropes."""
+        theme = get_theme(config.theme)
+        keywords = [theme.image_keywords]
+        if adult_rules_apply(config.theme, config.tropes):
+            keywords.append(theme.templates["adult_image_keywords"].strip())
+        return ", ".join(k for k in keywords if k)
 
-        return (
-            f"You are an expert at creating detailed image generation prompts for Stable Diffusion and Flux.\n\n"
-            f"{theme_line}\n"
-            f"Art style: {config.image_style}\n"
-            f"Rating: {config.content_rating.value}\n\n"
-            f"Every prompt you create MUST:\n"
-            f"1. Incorporate the theme visual elements listed above\n"
-            f"2. Use {config.image_style} art style throughout\n"
-            f"3. Specify lighting, atmosphere, and mood consistent with the theme\n"
-            f"4. Describe foreground, midground, and background\n"
-            f"5. Be consistent with other images in this set — same world, same visual rules\n\n"
-            f"Output ONLY the image prompt, no preamble or explanation."
+    @staticmethod
+    def _template_values(config: StoryConfig) -> dict[str, str]:
+        """Placeholders every themes.toml image template may use."""
+        theme = get_theme(config.theme)
+        return {
+            "theme": config.theme,
+            "theme_name": theme.name,
+            "theme_visuals": PromptGenerator._theme_visuals(config),
+            "style": config.image_style,
+            "rating": config.content_rating.value,
+        }
+
+    def _build_prompt_gen_system_prompt(self, config: StoryConfig) -> str:
+        return get_theme(config.theme).render(
+            "scene_system", **self._template_values(config)
         )
 
     def _build_prompt_gen_user_prompt(
         self, image_description: str, story_synopsis: str, config: StoryConfig
     ) -> str:
-        theme_keywords = self._THEME_VISUAL_KEYWORDS.get(config.theme.value, "")
-        theme_line = f"Theme visuals: {theme_keywords}\n" if theme_keywords else ""
-
-        return (
-            f"Story context:\n{story_synopsis}\n\n"
-            f"Scene to illustrate: {image_description}\n\n"
-            f"{theme_line}"
-            f"Art style: {config.image_style}\n\n"
-            f"Create a detailed image generation prompt for this specific scene. "
-            f"The prompt MUST reflect the {config.theme.value} theme and {config.image_style} style "
-            f"from the story context above.\n\n"
-            f"Output ONLY the image prompt:"
+        return get_theme(config.theme).render(
+            "scene_request",
+            **self._template_values(config),
+            synopsis=story_synopsis,
+            scene=image_description,
         )
 
     # ── story text helpers ───────────────────────────────────────────────────

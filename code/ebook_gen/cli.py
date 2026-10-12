@@ -7,16 +7,27 @@ from pathlib import Path
 
 import click
 
-from .config import DEFAULT_TEXT_MODEL, ProjectConfig
+from .config import (
+    DEFAULT_IMAGE_MODEL_DRAFT,
+    DEFAULT_IMAGE_MODEL_FINAL,
+    DEFAULT_IMAGE_MODEL_PREVIEW,
+    DEFAULT_TEXT_MODEL,
+    ProjectConfig,
+)
 from .models import (
-    ContentRating,
+    AUDIO_LANGUAGE_LABELS,
     IMAGE_STYLE_VALUES,
+    IMAGE_STYLES,
+    PIPELINE_STAGES,
+    PIPELINE_STEPS,
+    TEXT_LANGUAGE_OPTIONS,
+    ContentRating,
     ImageMode,
     ImageStatus,
     StoryConfig,
-    Theme,
 )
 from .progress import ProgressTracker
+from .themes import check_combination, get_themes, get_tropes
 
 
 def get_project_config() -> ProjectConfig:
@@ -58,7 +69,7 @@ def slugify(text: str) -> str:
     return text
 
 
-def build_story_id(title: str, theme: str, image_style: str) -> str:
+def build_story_id(title: str, theme: str, image_style: str, tropes: list[str] = ()) -> str:
     """Build a unique project directory name from title + active modifiers.
 
     Examples:
@@ -68,11 +79,15 @@ def build_story_id(title: str, theme: str, image_style: str) -> str:
             → three_billy_goats_gruff_cyberpunk
         "Three Billy Goats Gruff", "cyberpunk", "anime, studio ghibli style"
             → three_billy_goats_gruff_cyberpunk_anime
+        "Little Red Riding Hood", "monster_romance", "photo-realistic", ["enemies_to_lovers"]
+            → little_red_riding_hood_monster_romance_enemies_to_lovers
     """
     parts = [slugify(title)]
     if theme and theme != "unmodified":
         # Theme values (e.g. "cyberpunk", "caribbean_village") are already clean
         parts.append(theme)
+    # Trope keys are clean too
+    parts.extend(tropes)
     if image_style and image_style != "photo-realistic":
         # Take the first segment before a comma, then slugify
         style_short = slugify(image_style.split(",")[0].strip())
@@ -100,13 +115,16 @@ def _dimensions_for_mode(mode: ImageMode, base_width: int, base_height: int) -> 
         return base_width, base_height
 
 
-@click.group()
+@click.group(context_settings={"help_option_names": ["-h", "--help"], "show_default": True})
 @click.version_option(version="0.1.0")
 def cli():
     """Ebook Generation Pipeline.
 
     Generate themed, illustrated ebooks from story sources with AI-powered
     modifications, translations, and image generation.
+
+    Run 'ebook-gen help COMMAND' for a command's options and 'ebook-gen help
+    PARAM' for the values a parameter takes (theme, trope, rating, style, ...).
     """
     pass
 
@@ -115,21 +133,33 @@ def cli():
 @click.argument("title")
 @click.option(
     "--theme",
-    type=click.Choice([t.value for t in Theme]),
+    type=click.Choice(list(get_themes())),
     default="unmodified",
-    help="Story theme for modification",
+    metavar="THEME",
+    help="Story theme from themes.toml. List them: 'ebook-gen help theme'",
+)
+@click.option(
+    "--trope",
+    "tropes",
+    multiple=True,
+    type=click.Choice(list(get_tropes())),
+    metavar="TROPE",
+    help="Romance trope; repeat for more. Needs a theme; adds the adult rules. "
+    "List them: 'ebook-gen help trope'",
 )
 @click.option(
     "--rating",
     type=click.Choice([r.value for r in ContentRating]),
     default="none",
-    help="Target content rating",
+    help="Target content rating. 'none' lets step 3 pick one",
 )
 @click.option(
     "--languages",
     multiple=True,
     default=("en",),
-    help="Target languages (ISO 639-1 codes). Can be specified multiple times.",
+    metavar="CODE",
+    help="Translation target (ISO 639-1 code); repeat for more, e.g. "
+    "--languages en --languages es",
 )
 @click.option(
     "--text-model",
@@ -152,42 +182,62 @@ def cli():
     "image_style",
     type=click.Choice(IMAGE_STYLE_VALUES),
     default="photo-realistic",
-    help="Visual style for all images",
+    metavar="STYLE",
+    help="Visual style for all images; quote values with spaces. "
+    "List them: 'ebook-gen help style'",
 )
 @click.option(
     "--file",
     "source_file",
     required=True,
     type=click.Path(exists=True, dir_okay=False, readable=True),
-    help="Path to the source story file (.txt or .md).",
+    help="Source story (.txt or .md). Any host path; files outside the repo are "
+    "mounted read-only",
 )
 @click.option(
     "--audio-languages",
     multiple=True,
     default=(),
-    help="Languages to generate audio narration for (ISO 639-1). Can be specified multiple times.",
+    metavar="CODE",
+    help="Narrate in this language (draft and final modes); repeat for more. "
+    "List them: 'ebook-gen help audio-languages'",
 )
-def generate(title, theme, rating, languages, text_model, prompt_model, image_mode, image_style, source_file, audio_languages):
+def generate(title, theme, tropes, rating, languages, text_model, prompt_model, image_mode, image_style, source_file, audio_languages):
     """Generate an ebook from a local story file.
 
-    Example:
+    TITLE is the story's title; with the theme, tropes and style it makes the
+    story ID used by the other commands.
 
+    Examples:
+
+    \b
         ebook-gen generate "Three Billy Goats Gruff" \\
-            --file stories/three_billy_goats_gruff.md \\
-            --theme cyberpunk \\
-            --rating PG-13 \\
-            --languages en --languages es \\
-            --image-mode preview
+            --file stories/three_billy_goats_gruff.txt \\
+            --theme cyberpunk --rating PG-13 \\
+            --languages en --languages es
+
+    \b
+        ebook-gen generate "Little Red Riding Hood" \\
+            --file stories/little_red_riding_hood.txt \\
+            --theme monster_romance --trope enemies_to_lovers --rating R \\
+            --style "oil painting, painterly"
     """
+    try:
+        check_combination(theme, list(tropes))
+    except ValueError as e:
+        raise click.UsageError(str(e)) from e
+
     project = get_project_config()
     project.ensure_directories()
 
     # Create story ID (slug) — encodes title + active modifiers
-    story_id = build_story_id(title, theme, image_style)
+    story_id = build_story_id(title, theme, image_style, list(tropes))
 
     click.echo(f"Starting ebook generation for: {title}")
     click.echo(f"Story ID: {story_id}")
     click.echo(f"Theme: {theme}")
+    if tropes:
+        click.echo(f"Tropes: {', '.join(tropes)}")
     click.echo(f"Rating: {rating}")
     click.echo(f"Languages: {', '.join(languages)}")
     click.echo(f"Image mode: {image_mode}")
@@ -201,7 +251,8 @@ def generate(title, theme, rating, languages, text_model, prompt_model, image_mo
         title=title,
         source_file=source_file,
         source_language="en",
-        theme=Theme(theme),
+        theme=theme,
+        tropes=list(tropes),
         content_rating=ContentRating(rating),
         target_languages=list(languages),
         text_model=text_model,
@@ -378,6 +429,203 @@ def stages(story_id):
 
 
 @cli.command()
+def themes():
+    """List the story themes and romance tropes defined in themes.toml."""
+    _echo_values("theme")
+    click.echo()
+    _echo_values("trope")
+
+
+# ── help ────────────────────────────────────────────────────────────────────
+
+# Descriptions for positional arguments (click options carry their own help)
+_ARGUMENT_HELP = {
+    "title": "Story title; with the theme, tropes and style it makes the story ID",
+    "story_id": "Story ID that generate printed (a directory under projects/)",
+    "topic": "A command, a parameter, or 'params'",
+}
+
+# Plural or alternative names people type for parameters
+_PARAM_ALIASES = {
+    "themes": "theme",
+    "tropes": "trope",
+    "ratings": "rating",
+    "styles": "style",
+    "steps": "step",
+    "modes": "mode",
+    "language": "languages",
+    "audio-language": "audio-languages",
+    "model": "text-model",
+}
+
+
+def _theme_values():
+    rows = []
+    for key, theme in get_themes().items():
+        adult = " [adult]" if theme.adult else ""
+        rows.append((key, f"{theme.name}{adult}: {theme.description}"))
+    return rows
+
+
+def _trope_values():
+    return [(key, f"{t.name}: {t.description}") for key, t in get_tropes().items()]
+
+
+def _rating_values():
+    return [
+        ("none", "No target: step 3 rates the story and keeps its recommendation. "
+                 "Always used for unmodified"),
+        ("G", "General audiences"),
+        ("PG", "Parental guidance suggested"),
+        ("PG-13", "Some material unsuitable under 13"),
+        ("R", "Restricted: under 17 needs a parent or guardian"),
+        ("NC-17", "Adults only"),
+    ]
+
+
+def _image_mode_values():
+    return [
+        ("preview", f"256x192 scenes, {DEFAULT_IMAGE_MODEL_PREVIEW}. Seconds per image, "
+                    "for checking prompts; no ebook or audio"),
+        ("draft", f"512x384 scenes, {DEFAULT_IMAGE_MODEL_DRAFT}. Compiles a draft ebook "
+                  "(and audio) for layout review"),
+        ("final", f"1024x768 scenes, {DEFAULT_IMAGE_MODEL_FINAL} (FLUX non-commercial "
+                  "license). Compiles the publication ebook"),
+    ]
+
+
+def _mode_values():
+    return [row for row in _image_mode_values() if row[0] != "preview"]
+
+
+def _style_values():
+    return [(f'"{value}"' if " " in value else value, label) for label, value in IMAGE_STYLES]
+
+
+def _language_values():
+    return [(code, label) for label, code in TEXT_LANGUAGE_OPTIONS]
+
+
+def _audio_language_values():
+    return list(AUDIO_LANGUAGE_LABELS.items())
+
+
+def _step_values():
+    stage_of = {step: stage for stage, steps in PIPELINE_STAGES.items() for step in steps}
+    return [(str(num), f"{name} ({stage_of.get(num, '?')} container)") for num, name in PIPELINE_STEPS]
+
+
+def _model_values():
+    return [(DEFAULT_TEXT_MODEL, "Default. Any Hugging Face MLX repo id works, or an "
+                                 "Ollama tag with EBOOK_GEN_BACKEND=ollama")]
+
+
+# Parameters whose values `help PARAM` lists: (heading, values, note)
+_PARAM_VALUES = {
+    "theme": ("Themes (--theme), from themes.toml", _theme_values,
+              "Adult themes and any --trope add the adult rules: every character in a "
+              "romantic or sexual scene is an adult, and child characters are aged up."),
+    "trope": ("Romance tropes (--trope, repeat for more; needs a theme)", _trope_values,
+              "Tropes always add the adult rules."),
+    "rating": ("Content ratings (--rating)", _rating_values,
+               "With a target, step 3 keeps it even if the model recommends another, "
+               "and notes the recommendation."),
+    "image-mode": ("Image modes (generate --image-mode)", _image_mode_values,
+                   "Move a story up a tier later with promote-images."),
+    "mode": ("Promotion targets (promote-images --mode)", _mode_values, None),
+    "style": ("Image styles (--style)", _style_values, "Quote values that contain spaces."),
+    "languages": ("Translation languages (--languages, repeat for more)", _language_values,
+                  "Common choices; any ISO 639-1 code works, since the text model translates."),
+    "audio-languages": ("Narration languages (--audio-languages, repeat for more)",
+                        _audio_language_values,
+                        "Kokoro TTS voices; narration runs in draft and final modes only."),
+    "step": ("Pipeline steps (retry --step)", _step_values, None),
+    "text-model": ("Text models (--text-model, --prompt-model)", _model_values, None),
+    "prompt-model": ("Text models (--text-model, --prompt-model)", _model_values, None),
+}
+
+
+def _echo_values(name: str) -> None:
+    heading, values, note = _PARAM_VALUES[name]
+    rows = values()
+    width = max(len(value) for value, _ in rows) + 2
+    click.echo(f"{heading}:")
+    for value, description in rows:
+        click.echo(f"  {value:<{width}}{description}")
+    if note:
+        click.echo()
+        click.echo(note)
+
+
+def _param_name(param: click.Parameter) -> str:
+    if isinstance(param, click.Option):
+        return max(param.opts, key=len).lstrip("-")
+    return param.name
+
+
+def _params_by_name() -> dict[str, tuple[click.Parameter, list[str]]]:
+    """Every visible parameter of every visible command, and the commands taking it."""
+    found: dict[str, tuple[click.Parameter, list[str]]] = {}
+    for cmd_name, cmd in cli.commands.items():
+        if cmd.hidden or cmd_name == "help":
+            continue
+        for param in cmd.params:
+            if getattr(param, "hidden", False) or param.name == "help":
+                continue
+            name = _param_name(param)
+            found.setdefault(name, (param, []))[1].append(cmd_name)
+    return found
+
+
+def _echo_params() -> None:
+    click.echo("Parameters ('ebook-gen help PARAM' lists the values of those marked *):\n")
+    for name, (param, commands) in sorted(_params_by_name().items()):
+        if isinstance(param, click.Option):
+            label = f"--{name}"
+            description = param.help or ""
+        else:
+            label = name.upper()
+            description = _ARGUMENT_HELP.get(name, "")
+        if name in _PARAM_VALUES:
+            label += " *"
+        click.echo(f"  {label:<22}({', '.join(commands)})")
+        if description:
+            click.echo(f"      {description}")
+
+
+@cli.command("help", context_settings={"ignore_unknown_options": True})
+@click.argument("topic", required=False)
+@click.pass_context
+def help_command(ctx, topic):
+    """Show help for a command, or the values a parameter takes.
+
+    \b
+      ebook-gen help              list the commands
+      ebook-gen help COMMAND      a command's arguments and options
+      ebook-gen help PARAM        the values a parameter takes, e.g. theme
+      ebook-gen help params       every parameter and the commands that take it
+    """
+    if topic is None:
+        click.echo(ctx.parent.get_help())
+        return
+    name = topic.lstrip("-").replace("_", "-").lower()
+    name = _PARAM_ALIASES.get(name, name)
+    if name in ("params", "parameters", "options"):
+        _echo_params()
+    elif name in _PARAM_VALUES:
+        _echo_values(name)
+    elif name in cli.commands and not cli.commands[name].hidden:
+        cmd = cli.commands[name]
+        click.echo(cmd.get_help(click.Context(cmd, info_name=name, parent=ctx.parent)))
+    else:
+        raise click.UsageError(
+            f"No help for '{topic}'. Try a command "
+            f"({', '.join(sorted(n for n, c in cli.commands.items() if not c.hidden))}), "
+            f"a parameter ({', '.join(_PARAM_VALUES)}), or 'params'."
+        )
+
+
+@cli.command()
 @click.argument("story_id")
 def status(story_id):
     """Show the current pipeline status for a story.
@@ -438,7 +686,11 @@ def status(story_id):
 
 @cli.command()
 @click.argument("story_id")
-@click.option("--step", type=int, help="Retry a specific failed step (1-8)")
+@click.option(
+    "--step",
+    type=click.IntRange(1, len(PIPELINE_STEPS)),
+    help="Retry only this step. List them: 'ebook-gen help step'",
+)
 def retry(story_id, step):
     """Retry failed steps for a story.
 
@@ -575,6 +827,8 @@ def promote_images(story_id, mode, yes):
     target mode, then runs image generation.
 
     Three-tier workflow:
+
+    \b
       1. Generate with --image-mode preview to test prompts quickly.
       2. Run: promote-images <story> --mode draft  (layout review)
       3. Run: promote-images <story> --mode final  (publication quality)
@@ -696,7 +950,7 @@ def _write_obsidian_note(config: StoryConfig, project: ProjectConfig, story_id: 
 
 def main():
     """Entry point for the CLI."""
-    cli()
+    cli(prog_name="ebook-gen")
 
 
 if __name__ == "__main__":

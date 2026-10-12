@@ -26,53 +26,27 @@ from .cli import build_story_id, get_project_config, slugify
 from .components.audio_generator import KOKORO_LANG_MAP
 from .config import BackendConfig
 from .models import (
+    AUDIO_LANGUAGE_LABELS,
     IMAGE_STYLES,
     PIPELINE_STEPS,
+    TEXT_LANGUAGE_OPTIONS,
     ContentRating,
     ImageMode,
     PipelineStep,
     StepStatus,
     StoryConfig,
-    Theme,
 )
 from .progress import ProgressTracker
+from .themes import check_combination, get_themes, get_tropes
 
 
 
-THEME_OPTIONS = [(t.value, t.value) for t in Theme]
+THEME_OPTIONS = [(t.name, key) for key, t in get_themes().items()]
 MODE_OPTIONS = [(m.value, m.value) for m in ImageMode]
 STYLE_OPTIONS = [(label, val) for label, val in IMAGE_STYLES]
 
-# Common translation target languages (broad set for LLM-based translation)
-TEXT_LANGUAGE_OPTIONS = [
-    ("English (en)", "en"),
-    ("Spanish (es)", "es"),
-    ("French (fr)", "fr"),
-    ("German (de)", "de"),
-    ("Portuguese (pt)", "pt"),
-    ("Italian (it)", "it"),
-    ("Japanese (ja)", "ja"),
-    ("Chinese (zh)", "zh"),
-    ("Korean (ko)", "ko"),
-    ("Russian (ru)", "ru"),
-    ("Arabic (ar)", "ar"),
-    ("Hindi (hi)", "hi"),
-]
-
-# Audio languages: only Kokoro-supported languages
-_AUDIO_LANG_LABELS = {
-    "en": "English US (en)",
-    "en-gb": "English UK (en-gb)",
-    "es": "Spanish (es)",
-    "fr": "French (fr)",
-    "ja": "Japanese (ja)",
-    "zh": "Chinese (zh)",
-    "hi": "Hindi (hi)",
-    "it": "Italian (it)",
-    "pt": "Portuguese (pt)",
-}
 AUDIO_LANGUAGE_OPTIONS = [
-    (_AUDIO_LANG_LABELS.get(code, code), code)
+    (AUDIO_LANGUAGE_LABELS.get(code, code), code)
     for code in KOKORO_LANG_MAP
 ]
 
@@ -229,7 +203,7 @@ class EbookGeneratorApp(App):
         margin-right: 2;
     }
 
-    #style-select {
+    #style-select, #theme-select {
         width: 36;
     }
 
@@ -255,6 +229,11 @@ class EbookGeneratorApp(App):
     }
 
     .audio-list {
+        width: 1fr;
+        height: 5;
+    }
+
+    .trope-list {
         width: 1fr;
         height: 5;
     }
@@ -307,6 +286,13 @@ class EbookGeneratorApp(App):
                     *[(label, val) for label, val in AUDIO_LANGUAGE_OPTIONS],
                     id="audio-list",
                     classes="audio-list",
+                )
+            with Horizontal(classes="selection-row"):
+                yield Label("Tropes:", classes="selection-label")
+                yield SelectionList(
+                    *[(t.name, key) for key, t in get_tropes().items()],
+                    id="trope-list",
+                    classes="trope-list",
                 )
             yield Button("Generate", id="generate-btn", variant="success")
 
@@ -371,7 +357,13 @@ class EbookGeneratorApp(App):
 
         languages = list(self.query_one("#languages-list", SelectionList).selected) or ["en"]
         audio_langs = list(self.query_one("#audio-list", SelectionList).selected)
-        story_id = build_story_id(title, theme_val, style_val)
+        tropes = list(self.query_one("#trope-list", SelectionList).selected)
+        try:
+            check_combination(theme_val, tropes)
+        except ValueError as e:
+            self._log(f"[red][ERROR] {e}[/]")
+            return
+        story_id = build_story_id(title, theme_val, style_val, tropes)
         self._story_id = story_id
 
         project = get_project_config()
@@ -384,7 +376,8 @@ class EbookGeneratorApp(App):
             title=title,
             source_file=str(source_file),
             source_language="en",
-            theme=Theme(theme_val),
+            theme=theme_val,
+            tropes=tropes,
             content_rating=ContentRating.NONE,
             target_languages=languages,
             image_mode=ImageMode(mode_val),

@@ -17,7 +17,6 @@ from ebook_gen.models import (
     ContentRating,
     ImageMode,
     StoryConfig,
-    Theme,
 )
 from ebook_gen.utils.csv_io import read_audio_records, write_audio_records
 
@@ -31,7 +30,7 @@ def make_story_config(**kwargs) -> StoryConfig:
         source_language="en",
         target_languages=["en"],
         audio_languages=["en"],
-        theme=Theme.UNMODIFIED,
+        theme="unmodified",
         content_rating=ContentRating.NONE,
         image_mode=ImageMode.PREVIEW,
     )

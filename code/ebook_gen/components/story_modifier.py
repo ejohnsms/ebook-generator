@@ -4,8 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..backends import GenerationBackend
-from ..config import THEME_PROMPTS
-from ..models import StoryConfig, Theme
+from ..models import StoryConfig
+from ..themes import UNMODIFIED, adult_rules_apply, get_theme, get_trope
 from ..utils.file_io import safe_read_text, safe_write_text
 
 
@@ -60,7 +60,7 @@ class StoryModifier:
         raw_text = safe_read_text(input_data.raw_markdown_path)
 
         # Handle UNMODIFIED theme separately
-        if input_data.story_config.theme == Theme.UNMODIFIED:
+        if input_data.story_config.theme == UNMODIFIED:
             modified_text = self._process_unmodified(raw_text, input_data.story_config)
         else:
             # Apply theme transformation via LLM
@@ -94,7 +94,7 @@ class StoryModifier:
         """
         # Add minimal metadata annotation
         meta = f"""<!-- META
-theme: {config.theme.value}
+theme: {config.theme}
 rating: {config.content_rating.value}
 source: wikipedia
 -->
@@ -117,11 +117,7 @@ source: wikipedia
             BackendError: If LLM generation fails
         """
         # Get system prompt for theme
-        theme_key = config.theme.value
-        if theme_key not in THEME_PROMPTS:
-            raise ValueError(f"No system prompt found for theme: {theme_key}")
-
-        system_prompt = THEME_PROMPTS[theme_key]
+        system_prompt = get_theme(config.theme).story_prompt
 
         # Construct user prompt
         user_prompt = self._build_modification_prompt(raw_text, config)
@@ -136,7 +132,7 @@ source: wikipedia
 
         # Add metadata annotation at the top
         meta = f"""<!-- META
-theme: {config.theme.value}
+theme: {config.theme}
 rating: {config.content_rating.value}
 source: wikipedia
 -->
@@ -154,26 +150,29 @@ source: wikipedia
         Returns:
             Formatted prompt for the LLM
         """
-        prompt = f"""Please rewrite the following story into a {config.theme.value} setting.
-
-Original Story:
-{raw_text}
-
-Requirements:
-1. Maintain the original narrative arc and character relationships
-2. Transform all elements to fit the {config.theme.value} theme
-3. Structure your output with Markdown chapter headings (## Chapter N: Title)
-4. Add annotations using HTML comments:
-   - <!-- DIRECTOR: staging and mood notes -->
-   - <!-- THEME: explain thematic connections -->
-   - <!-- IMAGE: describe key visual moments for illustration -->
-5. Add 2-3 IMAGE annotations per chapter at visually striking moments
-6. Keep the moral and thematic core of the original story
-7. Target content rating: {config.content_rating.value}
-
-Output only the rewritten story with annotations. Do not include any preamble or explanation.
-"""
-        return prompt
+        theme = get_theme(config.theme)
+        rating = config.content_rating.value
+        adult_rules = (
+            theme.render("adult_rules", rating=rating)
+            if adult_rules_apply(config.theme, config.tropes)
+            else ""
+        )
+        tropes = ""
+        if config.tropes:
+            trope_lines = "\n".join(
+                f"- {t.name}: {t.guidance}" for t in map(get_trope, config.tropes)
+            )
+            tropes = theme.render("tropes_request", tropes=trope_lines)
+        return theme.render(
+            "story_request",
+            theme=config.theme,
+            theme_name=theme.name,
+            rating=rating,
+            story=raw_text,
+            motif_map=theme.motif_map,
+            adult_rules=adult_rules,
+            tropes=tropes,
+        )
 
     def _count_chapters(self, markdown_text: str) -> int:
         """Count chapters in markdown text.

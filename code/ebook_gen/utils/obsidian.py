@@ -74,14 +74,15 @@ def write_story_note(
 ---
 title: "{config.title}"
 story_id: {config.story_id}
-theme: {config.theme.value}
+theme: {config.theme}
+tropes: [{', '.join(config.tropes)}]
 rating: {config.content_rating.value}
 image_mode: {config.image_mode.value}
 languages: [{languages}]
 audio: [{audio_langs}]
 source: "{config.source_file}"
 updated: {now}
-tags: [ebook-gen, {config.theme.value}]
+tags: [ebook-gen, {config.theme}]
 ---
 
 # {config.title}

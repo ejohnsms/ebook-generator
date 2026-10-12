@@ -41,26 +41,114 @@ info() { echo "==> $*" >&2; }
 usage() {
     cat <<'EOF'
 Usage: ./ebook-gen <command> [args]
+       ./ebook-gen help [COMMAND | PARAM | params]
 
 Pipeline (each stage runs in its own container):
   generate TITLE --file PATH [options]   Run a new story through the pipeline
+      --theme THEME                 story theme (default: unmodified)
+      --trope TROPE                 romance trope; repeat for more
+      --rating RATING               none (default), G, PG, PG-13, R, NC-17
+      --style STYLE                 image style (default: photo-realistic)
+      --image-mode MODE             preview (default), draft, final
+      --languages CODE              translation target; repeat (default: en)
+      --audio-languages CODE        narration language; repeat (draft/final)
+      --text-model REPO             text model (default: Gemma 4 12B MLX)
+      --prompt-model REPO           image-prompt model (default: --text-model)
   resume STORY_ID                       Continue from the first incomplete step
-  retry STORY_ID [--step N]             Re-run failed steps (or step N)
-  promote-images STORY_ID --mode M      Regenerate images as draft or final
+  retry STORY_ID [--step N]             Re-run failed steps (or only step N)
+  promote-images STORY_ID [options]     Regenerate images at a higher tier
+      --mode MODE                   draft (default) or final
+      -y, --yes                     don't ask if already in this mode
   status STORY_ID                       Show pipeline progress
   preview-images STORY_ID               List generated images
+  themes                                List themes and romance tropes
   tui                                   Interactive terminal UI
 
 Setup and development:
   build [STAGE...]                      Build images (default: all, plus dev)
   model-server start|stop|status|logs   Manage the host MLX model server
   test [PYTEST_ARGS...]                 Run the test suite
-  lint | format                         ruff check / ruff format
+  lint [RUFF_ARGS...]                   ruff check
+  format [RUFF_ARGS...]                 ruff format
   shell [STAGE]                         Shell in a stage image (default: dev)
 
-Run './ebook-gen generate --help' for generate's options. --file may be any
-path on the host; files outside this repository are mounted read-only.
+Help:
+  help COMMAND                          A command's arguments and options
+  help PARAM                            A parameter's values: theme, trope,
+                                        rating, style, image-mode, mode, step,
+                                        languages, audio-languages, text-model
+  help params                           Every parameter and its commands
+
+STAGE is text, images, compile, audio or dev. --file may be any path on the
+host; files outside this repository are mounted read-only.
 EOF
+}
+
+# Help for the commands this script handles itself (the rest are in the CLI)
+wrapper_help() {
+    case $1 in
+        build) cat <<'EOF'
+Usage: ./ebook-gen build [STAGE...]
+
+  Build the container images. With no STAGE, builds every pipeline stage plus
+  dev. Images also build on demand when missing or stale (a hash of
+  Containerfile + pixi.toml).
+
+  STAGE: text (steps 1-5), images (6), compile (7), audio (8), dev (tests,
+  lint, TUI).
+EOF
+            ;;
+        model-server) cat <<'EOF'
+Usage: ./ebook-gen model-server start|stop|status|logs
+
+  Manage the host MLX model server the containers call (port 8765). Pipeline
+  commands start it on demand.
+
+  start    start it and wait until healthy
+  stop     stop it
+  status   running or stopped (default)
+  logs     follow its log
+EOF
+            ;;
+        test) cat <<'EOF'
+Usage: ./ebook-gen test [PYTEST_ARGS...]
+
+  Run pytest on code/tests in the dev image. Arguments go to pytest, e.g.
+  ./ebook-gen test -k themes   or   ./ebook-gen test --cov=ebook_gen
+EOF
+            ;;
+        lint | format) cat <<'EOF'
+Usage: ./ebook-gen lint [RUFF_ARGS...]
+       ./ebook-gen format [RUFF_ARGS...]
+
+  Run ruff check / ruff format on code/ in the dev image. Arguments go to
+  ruff, e.g. ./ebook-gen lint --fix
+EOF
+            ;;
+        shell) cat <<'EOF'
+Usage: ./ebook-gen shell [STAGE]
+
+  Open a bash shell in a stage image (default: dev) with the repo at
+  /workspace. STAGE: text, images, compile, audio or dev.
+EOF
+            ;;
+        tui) cat <<'EOF'
+Usage: ./ebook-gen tui
+
+  Interactive terminal UI: pick a story file, theme, tropes, image mode,
+  style and languages, then watch the pipeline run.
+EOF
+            ;;
+        stage) cat <<'EOF'
+STAGE (build, shell):
+  text      steps 1-5: read, theme, rate, translate, image prompts
+  images    step 6: image generation
+  compile   step 7: ePub and PDF
+  audio     step 8: narration
+  dev       tests, lint and the TUI
+EOF
+            ;;
+    esac
 }
 
 # ── container system and images ─────────────────────────────────────────────
@@ -293,7 +381,14 @@ cmd=${1:-help}
 
 case $cmd in
     help | -h | --help)
-        usage
+        case ${1:-} in
+            "") usage ;;
+            build | model-server | test | lint | format | shell | tui | stage) wrapper_help "$1" ;;
+            *)
+                ensure_system
+                cli_in text help "$@"
+                ;;
+        esac
         ;;
 
     build)

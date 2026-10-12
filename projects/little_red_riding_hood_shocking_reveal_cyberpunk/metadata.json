@@ -1,0 +1,24 @@
+{
+  "story_id": "little_red_riding_hood_shocking_reveal_cyberpunk",
+  "title": "Little Red Riding Hood Shocking Reveal",
+  "source_file": "/workspace/stories/little_red_riding_hood.txt",
+  "source_language": "en",
+  "theme": "cyberpunk",
+  "content_rating": "NC-17",
+  "target_languages": [
+    "en"
+  ],
+  "text_model": "mlx-community/gemma-4-12B-it-qat-4bit",
+  "prompt_model": "mlx-community/gemma-4-12B-it-qat-4bit",
+  "image_model_preview": "mflux-community/flux2-klein-4b-mflux-q4",
+  "image_model_draft": "mflux-community/flux2-klein-4b-mflux-q4",
+  "image_model_final": "mflux-community/flux2-klein-9b-mflux-q4",
+  "image_mode": "preview",
+  "layout_style": "traditional",
+  "image_style": "photo-realistic",
+  "audio_languages": [],
+  "voice_preferences": {},
+  "created_at": "2026-10-11T20:57:18.826924",
+  "modified_at": "2026-10-11T20:57:18.826926",
+  "rating_justification": "Target rating NC-17 applied (recommended: PG-13). While the story contains dark cyberpunk themes, a sense of dread, and a violent conclusion, it lacks the graphic sexual content, extreme gore, or pervasive profanity required for an NC-17 rating. The violence is implied through 'digital' means (neural-link hijacking and parasitic uploads) rather than explicit physical descriptions. The 'teeth' dialogue is unsettling and macabre, but falls under psychological horror/suspense rather than extreme content."
+}

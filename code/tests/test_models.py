@@ -11,7 +11,6 @@ from ebook_gen.models import (
     PipelineStep,
     StepStatus,
     StoryConfig,
-    Theme,
 )
 
 
@@ -29,7 +28,7 @@ class TestStoryConfig:
         assert config.story_id == "test-story"
         assert config.title == "Test Story"
         assert config.source_language == "en"
-        assert config.theme == Theme.UNMODIFIED
+        assert config.theme == "unmodified"
         assert config.content_rating == ContentRating.NONE
         assert config.target_languages == ["en"]
         assert config.image_mode == ImageMode.PREVIEW
@@ -40,7 +39,7 @@ class TestStoryConfig:
             story_id="test",
             title="Test",
             source_file="/tmp/test_story.md",
-            theme=Theme.CYBERPUNK,
+            theme="cyberpunk",
             content_rating=ContentRating.PG13,
         )
 
@@ -68,7 +67,7 @@ class TestStoryConfig:
         config = StoryConfig.from_dict(data)
 
         assert config.story_id == "test"
-        assert config.theme == Theme.CYBERPUNK
+        assert config.theme == "cyberpunk"
         assert config.content_rating == ContentRating.PG13
         assert config.target_languages == ["en", "es"]
 
@@ -78,7 +77,7 @@ class TestStoryConfig:
             story_id="test",
             title="Test",
             source_file="/tmp/test_story.md",
-            theme=Theme.SPACE_OPERA,
+            theme="space_opera",
             target_languages=["en", "es", "hi"],
         )
 
@@ -247,12 +246,6 @@ class TestPipelineStep:
 
 class TestEnums:
     """Tests for enum values."""
-
-    def test_theme_values(self):
-        """Test Theme enum values."""
-        assert Theme.CYBERPUNK.value == "cyberpunk"
-        assert Theme.UNMODIFIED.value == "unmodified"
-        assert Theme.CARIBBEAN_VILLAGE.value == "caribbean_village"
 
     def test_content_rating_values(self):
         """Test ContentRating enum values."""
