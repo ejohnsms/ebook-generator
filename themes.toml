@@ -45,6 +45,8 @@
 #   {adult_rules}    the rendered adult_rules, or nothing (story_request only)
 #   {tropes}         in story_request: the rendered tropes_request, or nothing;
 #                    in tropes_request: one "- Name: guidance" line per trope
+#   {direction}      in story_request: the rendered direction_request, or
+#                    nothing; in direction_request: the --direction text
 #   {synopsis}       the start of the story (scene_request, cover_request)
 #   {scene}          the IMAGE annotation being illustrated (scene_request only)
 [defaults]
@@ -72,7 +74,7 @@ Requirements:
 5. Add 2-3 IMAGE annotations per chapter at visually striking moments
 6. Keep the moral and thematic core of the original story
 7. Target content rating: {rating}
-{adult_rules}{tropes}
+{adult_rules}{tropes}{direction}
 Output only the rewritten story with annotations. Do not include any preamble or explanation.
 """
 
@@ -93,6 +95,15 @@ tropes_request = """
 
 Romance tropes to build into the story. Shape the relationship arc around them while keeping the tale's core motifs:
 {tropes}
+"""
+
+# Added to story_request when --direction is given. It may change the plot, so
+# it outranks the requirements above to keep the tale's motifs, arc and moral;
+# the adult rules still come first.
+direction_request = """
+
+Story direction from the author. Follow it even where it departs from the original plot, characters, ending or moral; it takes precedence over the requirements above to keep the core motifs, narrative arc and moral. Keep whatever it doesn't change:
+{direction}
 """
 
 # Appended to the theme visuals for adult themes and tropes, so images show

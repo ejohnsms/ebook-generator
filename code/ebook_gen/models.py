@@ -126,6 +126,7 @@ class StoryConfig:
     source_language: str = "en"
     theme: str = UNMODIFIED  # a key in themes.toml
     tropes: list[str] = field(default_factory=list)  # [tropes.KEY] keys in themes.toml
+    direction: str = ""  # --direction: plot guidance for step 2's rewrite
     content_rating: ContentRating = ContentRating.NONE
     target_languages: list[str] = field(default_factory=lambda: ["en"])
     text_model: str = DEFAULT_TEXT_MODEL
@@ -150,6 +151,7 @@ class StoryConfig:
             "source_language": self.source_language,
             "theme": self.theme,
             "tropes": self.tropes,
+            "direction": self.direction,
             "content_rating": self.content_rating.value,
             "target_languages": self.target_languages,
             "text_model": self.text_model,
@@ -176,6 +178,7 @@ class StoryConfig:
             source_language=data.get("source_language", "en"),
             theme=data.get("theme", UNMODIFIED),
             tropes=data.get("tropes", []),
+            direction=data.get("direction", ""),
             content_rating=ContentRating(data.get("content_rating", "none")),
             target_languages=data.get("target_languages", ["en"]),
             # Older metadata.json files use ollama_* keys; read them as a fallback.

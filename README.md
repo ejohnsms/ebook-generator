@@ -76,7 +76,7 @@ The model server downloads models from Hugging Face on first use, into `HF_HOME`
 
 `--file` takes any path on the host, relative or absolute; a file outside the repository is mounted read-only into the container.
 
-The story ID is the slugified title plus the theme, any tropes, and the image style when they aren't the defaults (`unmodified`, `photo-realistic`), e.g. `three_billy_goats_gruff_cyberpunk` or `little_red_riding_hood_monster_romance_enemies_to_lovers_oil_painting`.
+The story ID is the slugified title plus the theme, any tropes, the image style when they aren't the defaults (`unmodified`, `photo-realistic`), and a hash of `--direction` if given, e.g. `three_billy_goats_gruff_cyberpunk` or `little_red_riding_hood_monster_romance_enemies_to_lovers_oil_painting`.
 
 ### Generate with Audio Narration
 
@@ -171,6 +171,18 @@ Every rewrite asks the text model to identify the story's Aarne-Thompson-Uther (
 ./ebook-gen generate "Little Red Riding Hood" \
   --file stories/little_red_riding_hood.txt --theme formula_tale --rating G
 ```
+
+### Steering the plot with --direction
+
+Rewrites normally keep the tale's motifs, arc and moral. To change the plot without editing the source file, pass `--direction` with any theme except `unmodified`. Step 2 adds it to the rewrite request (`direction_request` in `[defaults]`) and lets it override the keep-the-original rules; the adult rules still come first. It's saved in `metadata.json`, so `resume` and `retry` reuse it.
+
+```bash
+./ebook-gen generate "Three Billy Goats Gruff" \
+  --file stories/three_billy_goats_gruff.txt --theme cyberpunk \
+  --direction "The troll is the hero, a hacker guarding the undercity's last free network; the goats are megacorp agents. The troll wins."
+```
+
+The story ID ends in `dir` plus an 8-character hash of the direction (ignoring extra whitespace), e.g. `three_billy_goats_gruff_cyberpunk_dir1a2b3c4d`, so each direction gets its own project. Specific changes ("in chapter 3 the troll lets the first goat pass") work better than general ones ("make it darker").
 
 ### Adult themes and romance tropes
 

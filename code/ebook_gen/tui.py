@@ -267,6 +267,12 @@ class EbookGeneratorApp(App):
                     id="title-input",
                 )
             with Horizontal(classes="field-row"):
+                yield Label("Direction:", classes="field-label")
+                yield Input(
+                    placeholder="Optional plot changes for the rewrite, e.g. the troll is the hero",
+                    id="direction-input",
+                )
+            with Horizontal(classes="field-row"):
                 yield Label("Theme:", classes="field-label")
                 yield Select(THEME_OPTIONS, value="unmodified", id="theme-select")
                 yield Label("Mode:", classes="field-label")
@@ -358,12 +364,13 @@ class EbookGeneratorApp(App):
         languages = list(self.query_one("#languages-list", SelectionList).selected) or ["en"]
         audio_langs = list(self.query_one("#audio-list", SelectionList).selected)
         tropes = list(self.query_one("#trope-list", SelectionList).selected)
+        direction = self.query_one("#direction-input", Input).value.strip()
         try:
-            check_combination(theme_val, tropes)
+            check_combination(theme_val, tropes, direction)
         except ValueError as e:
             self._log(f"[red][ERROR] {e}[/]")
             return
-        story_id = build_story_id(title, theme_val, style_val, tropes)
+        story_id = build_story_id(title, theme_val, style_val, tropes, direction)
         self._story_id = story_id
 
         project = get_project_config()
@@ -378,6 +385,7 @@ class EbookGeneratorApp(App):
             source_language="en",
             theme=theme_val,
             tropes=tropes,
+            direction=direction,
             content_rating=ContentRating.NONE,
             target_languages=languages,
             image_mode=ImageMode(mode_val),

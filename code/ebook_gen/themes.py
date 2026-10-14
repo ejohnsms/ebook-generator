@@ -35,9 +35,10 @@ _TROPE_FIELDS = ("name", "description", "guidance")
 
 # Prompt templates and the {placeholders} each one may use
 TEMPLATE_FIELDS: dict[str, set[str]] = {
-    "story_request": {"theme", "theme_name", "rating", "story", "motif_map", "adult_rules", "tropes"},
+    "story_request": {"theme", "theme_name", "rating", "story", "motif_map", "adult_rules", "tropes", "direction"},
     "adult_rules": {"rating"},
     "tropes_request": {"tropes"},
+    "direction_request": {"direction"},
     "adult_image_keywords": set(),
     "scene_system": {"theme", "theme_name", "theme_visuals", "style", "rating"},
     "scene_request": {"theme", "theme_name", "theme_visuals", "style", "rating", "synopsis", "scene"},
@@ -240,12 +241,16 @@ def adult_rules_apply(theme: str, tropes: list[str]) -> bool:
     return get_theme(theme).adult or bool(tropes)
 
 
-def check_combination(theme: str, tropes: list[str]) -> None:
-    """Raise ValueError if the theme/trope combination can't run."""
+def check_combination(theme: str, tropes: list[str], direction: str = "") -> None:
+    """Raise ValueError if the theme/trope/direction combination can't run."""
     get_theme(theme)
     for key in tropes:
         get_trope(key)
     if tropes and theme == UNMODIFIED:
         raise ValueError(
             "Tropes need a theme: 'unmodified' doesn't rewrite the story. Pick a --theme."
+        )
+    if direction.strip() and theme == UNMODIFIED:
+        raise ValueError(
+            "--direction needs a theme: 'unmodified' doesn't rewrite the story. Pick a --theme."
         )

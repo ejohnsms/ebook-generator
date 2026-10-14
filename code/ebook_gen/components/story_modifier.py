@@ -163,6 +163,9 @@ source: wikipedia
                 f"- {t.name}: {t.guidance}" for t in map(get_trope, config.tropes)
             )
             tropes = theme.render("tropes_request", tropes=trope_lines)
+        direction = ""
+        if config.direction.strip():
+            direction = theme.render("direction_request", direction=config.direction.strip())
         return theme.render(
             "story_request",
             theme=config.theme,
@@ -172,6 +175,7 @@ source: wikipedia
             motif_map=theme.motif_map,
             adult_rules=adult_rules,
             tropes=tropes,
+            direction=direction,
         )
 
     def _count_chapters(self, markdown_text: str) -> int:

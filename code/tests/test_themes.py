@@ -2,7 +2,7 @@
 
 import pytest
 
-from ebook_gen.cli import build_story_id
+from ebook_gen.cli import build_story_id, direction_hash
 from ebook_gen.components.prompt_generator import PromptGenerator
 from ebook_gen.components.story_modifier import StoryModifier
 from ebook_gen.models import ContentRating, StoryConfig
@@ -204,6 +204,49 @@ class TestPrompts:
             _config("steampunk", ["second_chance"])
         )
         assert "adults" not in PromptGenerator._theme_visuals(_config("steampunk"))
+
+
+    def test_direction_outranks_motif_rules(self):
+        config = _config("cyberpunk")
+        config.direction = "  The troll is the hero.  "
+        request = StoryModifier(None)._build_modification_prompt("STORY", config)
+        assert "Story direction from the author" in request
+        assert "takes precedence" in request
+        assert "The troll is the hero.\n" in request
+        assert request.index("The troll is the hero.") < request.index("Output only")
+
+    def test_no_direction_block_without_direction(self):
+        request = StoryModifier(None)._build_modification_prompt("STORY", _config("cyberpunk"))
+        assert "Story direction" not in request
+
+
+def test_direction_needs_a_theme():
+    check_combination("cyberpunk", [], "The troll is the hero.")
+    check_combination("unmodified", [], "   ")
+    with pytest.raises(ValueError, match="--direction needs a theme"):
+        check_combination("unmodified", [], "The troll is the hero.")
+
+
+def test_story_id_includes_direction_hash():
+    plain = build_story_id("Three Billy Goats Gruff", "cyberpunk", "photo-realistic")
+    directed = build_story_id(
+        "Three Billy Goats Gruff", "cyberpunk", "photo-realistic", [], "The troll is the hero."
+    )
+    assert directed == f"{plain}_dir{direction_hash('The troll is the hero.')}"
+    assert len(direction_hash("The troll is the hero.")) == 8
+    # Whitespace doesn't change the hash; different text does
+    assert direction_hash("  The troll   is the hero.\n") == direction_hash("The troll is the hero.")
+    assert direction_hash("The goats win.") != direction_hash("The troll is the hero.")
+    assert build_story_id("X", "cyberpunk", "photo-realistic", [], "   ") == "x_cyberpunk"
+
+
+def test_story_config_round_trips_direction():
+    config = _config("cyberpunk")
+    config.direction = "The troll is the hero."
+    assert StoryConfig.from_dict(config.to_dict()).direction == "The troll is the hero."
+    data = config.to_dict()
+    del data["direction"]
+    assert StoryConfig.from_dict(data).direction == ""
 
 
 def test_story_id_includes_tropes():

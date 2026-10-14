@@ -1,5 +1,6 @@
 """Command-line interface for ebook generation."""
 
+import hashlib
 import json
 import os
 import sys
@@ -69,7 +70,17 @@ def slugify(text: str) -> str:
     return text
 
 
-def build_story_id(title: str, theme: str, image_style: str, tropes: list[str] = ()) -> str:
+def direction_hash(direction: str) -> str:
+    """Short, stable hash of a --direction text (whitespace-insensitive), or "" for none."""
+    normalized = " ".join(direction.split())
+    if not normalized:
+        return ""
+    return hashlib.sha256(normalized.encode()).hexdigest()[:8]
+
+
+def build_story_id(
+    title: str, theme: str, image_style: str, tropes: list[str] = (), direction: str = ""
+) -> str:
     """Build a unique project directory name from title + active modifiers.
 
     Examples:
@@ -81,6 +92,8 @@ def build_story_id(title: str, theme: str, image_style: str, tropes: list[str] =
             → three_billy_goats_gruff_cyberpunk_anime
         "Little Red Riding Hood", "monster_romance", "photo-realistic", ["enemies_to_lovers"]
             → little_red_riding_hood_monster_romance_enemies_to_lovers
+        "Three Billy Goats Gruff", "cyberpunk", "photo-realistic", [], "The troll is the hero."
+            → three_billy_goats_gruff_cyberpunk_dir<8 hex chars>
     """
     parts = [slugify(title)]
     if theme and theme != "unmodified":
@@ -93,6 +106,8 @@ def build_story_id(title: str, theme: str, image_style: str, tropes: list[str] =
         style_short = slugify(image_style.split(",")[0].strip())
         if style_short:
             parts.append(style_short)
+    if digest := direction_hash(direction):
+        parts.append(f"dir{digest}")
     return "_".join(parts)
 
 
@@ -146,6 +161,14 @@ def cli():
     metavar="TROPE",
     help="Romance trope; repeat for more. Needs a theme; adds the adult rules. "
     "List them: 'ebook-gen help trope'",
+)
+@click.option(
+    "--direction",
+    default="",
+    metavar="TEXT",
+    help="How the rewrite should change the plot, e.g. \"the troll is the hero\". "
+    "Steers step 2 without editing the source file; may override the original "
+    "arc, ending and moral. Needs a theme",
 )
 @click.option(
     "--rating",
@@ -202,7 +225,7 @@ def cli():
     help="Narrate in this language (draft and final modes); repeat for more. "
     "List them: 'ebook-gen help audio-languages'",
 )
-def generate(title, theme, tropes, rating, languages, text_model, prompt_model, image_mode, image_style, source_file, audio_languages):
+def generate(title, theme, tropes, direction, rating, languages, text_model, prompt_model, image_mode, image_style, source_file, audio_languages):
     """Generate an ebook from a local story file.
 
     TITLE is the story's title; with the theme, tropes and style it makes the
@@ -223,7 +246,7 @@ def generate(title, theme, tropes, rating, languages, text_model, prompt_model, 
             --style "oil painting, painterly"
     """
     try:
-        check_combination(theme, list(tropes))
+        check_combination(theme, list(tropes), direction)
     except ValueError as e:
         raise click.UsageError(str(e)) from e
 
@@ -231,13 +254,15 @@ def generate(title, theme, tropes, rating, languages, text_model, prompt_model, 
     project.ensure_directories()
 
     # Create story ID (slug) — encodes title + active modifiers
-    story_id = build_story_id(title, theme, image_style, list(tropes))
+    story_id = build_story_id(title, theme, image_style, list(tropes), direction)
 
     click.echo(f"Starting ebook generation for: {title}")
     click.echo(f"Story ID: {story_id}")
     click.echo(f"Theme: {theme}")
     if tropes:
         click.echo(f"Tropes: {', '.join(tropes)}")
+    if direction:
+        click.echo(f"Direction: {direction}")
     click.echo(f"Rating: {rating}")
     click.echo(f"Languages: {', '.join(languages)}")
     click.echo(f"Image mode: {image_mode}")
@@ -253,6 +278,7 @@ def generate(title, theme, tropes, rating, languages, text_model, prompt_model, 
         source_language="en",
         theme=theme,
         tropes=list(tropes),
+        direction=direction,
         content_rating=ContentRating(rating),
         target_languages=list(languages),
         text_model=text_model,

@@ -77,6 +77,7 @@ Themes and romance tropes live in `themes.toml` at the repo root (`code/ebook_ge
 - `[defaults]` holds the shared prompt templates (step 2's rewrite request, the adult rules, the trope request, adult image keywords, step 5's scene and cover prompts), with `{placeholders}` checked at load time. A theme table can override any of them.
 - The rewrite request asks the model to keep the tale's ATU type and core motifs, changing their surface through the motif map. Themes cover settings (cyberpunk, steampunk…), the seven ATU divisions (animal fable … formula tale), and adult romance genres.
 - `[tropes.KEY]` tables are romance tropes, picked with repeatable `--trope` (stored in `StoryConfig.tropes`, appended to the story ID). Tropes need a theme other than `unmodified`.
+- `--direction TEXT` (`StoryConfig.direction`; the story ID gets `_dir` + an 8-char sha256 of the whitespace-normalized text) steers step 2's plot without editing the source: `direction_request` is appended to the rewrite and outranks the keep-motifs/arc/moral requirements (not the adult rules). Needs a theme other than `unmodified`.
 - Adult themes and any trope add `adult_rules` to the rewrite (everyone in a romantic or sexual scene is an adult; child characters are always aged up) and `adult_image_keywords` to image prompts (adults, clothed, suggestive rather than explicit).
 - `unmodified` is built in; its `[unmodified]` table only takes name, description and template overrides. `StoryConfig.theme` is the key as a string.
 
